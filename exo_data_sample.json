@@ -1,0 +1,102 @@
+[
+  {
+    "image_id": 579446,
+    "image_path": "\\000000579446.jpg",
+    "image_resolution": "480 x 640",
+    "question": "<REL>Second-closest</REL> to the refrigerator a countertop located <POS>in the center</POS> of the image, which object is it <ATT>among the items</ATT>? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(b) vase",
+    "rationale": "The question is exo-centric: The sink is placed immediately adjacent to the refrigerator, making it the closest. The vase sits slightly forward on the counter, farther than the sink but clearly closer than the orange bag at the far right edge and the red chair in the front seating area. Therefore the vase is second-closest.",
+    "bbox": [260.35,375.13,18.42,21.74],
+    "view": "exo"
+  },
+  {
+    "image_id": 579648,
+    "image_path": "\\000000579648.jpg",
+    "image_resolution": "640 x 480",
+    "question": "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) handbag",
+    "rationale": "The question is exo-centric: The laptop and the cell phone are located on the sofa near the brown-haired man, while the handbag is placed on the floor near his feet. The coke bottle is also on the floor, but it is cylindrical, not square-shaped. Therefore the handbag is the only square-shaped object on the floor.",
+    "bbox": [372.16,359.34,169.65,113.1],
+    "view": "exo"
+  },
+  {
+    "image_id": 580026,
+    "image_path": "\\000000580026.jpg",
+    "image_resolution": "640 x 437",
+    "question": "Which <ATT>round and cylindrical object</ATT> is <REL>farthest</REL> from the person sitting <POS>on the right side of</POS> the dining table? <choice>(a) plate, (b) white cake, (c) rightmost coke, (d) vase</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(d) vase",
+    "rationale": "The question is exo-centric: The boy is sitting on the right side of the table, so the plate, the white cake, and the rightmost coke glass are all closer to him compared to the large flower vase, which is positioned far to the opposite side of the table. Therefore the vase is the farthest object from the boy, making the vase correct.",
+    "bbox": [21.33,208.28,54.52,82.29],
+    "view": "exo"
+  },
+  {
+    "image_id": 580051, 
+    "image_path": "\\000000580051.jpg",
+    "image_resolution": "640 x 480",
+    "question": "<ATT>Which square or rectangular object</ATT> is the <REL>farthest</REL> <POS>to the left side</POS> from the fish tank? <choice>(a) chair cushion, (b) microwave, (c) hair dryer, (d) cereal box</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(b) microwave",
+    "rationale": "The question is exo-centric: the hair dryer is not a rectangular object so it is excluded, and the chair cushion is on the right side of the fish tank so it is excluded. On the left side, there is a cereal box on top of the refrigerator and the microwave, but the microwave is farther from the fish tank than the cereal box. Therefore the microwave is correct.",
+    "bbox": [82.83,152.45,68.38,61.22],
+    "view": "exo"
+  },
+  {
+    "image_id": 580057,
+    "image_path": "\\000000580057.jpg",
+    "image_resolution": "640 x 427",
+    "question": "<POS>Around the dining table</POS> <ATT>among the visible people</ATT>, which one is the person who is the <REL>farthest</REL> from the black bag placed <POS>on the left side of</POS> the sofa? <choice>(a) white shirt woman, (b) patterned shirt woman, (c) child, (d) blue shirt man</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(d) blue shirt man",
+    "rationale": "The question is exo-centric: The black bag is located on the left side of the sofa, and the woman in white, woman in patterned shirt, and child are all physically closer to that bag. The  man in blue shirt is seated on the opposite side of the table, farther away from the left sofa edge. Therefore the man in blue shirt is the farthest from the black bag, making man in blue shirt correct.",
+    "bbox": [221.31,229.28,252.47,92.74],
+    "view": "exo"
+  },
+  {
+    "image_id": 580344,
+    "image_path": "\\000000580344.jpg",
+    "image_resolution": "640 x 424",
+    "question": "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table? <choice>(a) glass, (b) potato fries, (c) hamburger, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(c) hamburger",
+    "rationale": "The question is exo-centric: the cell phone on the right side of table is the farthest, but it is not an edible object so it is excluded. The glass is also non-edible, so it is excluded as well. Among edible objects, the hamburger is farther from the fork than the potato fries. Therefore the hamburger is correct.",
+    "bbox": [282.67,180.41,203.13,171.88],
+    "view": "exo"
+  },
+  {
+    "image_id": 580388,
+    "image_path": "\\000000580388.jpg",
+    "image_resolution": "640 x 480",
+    "question": "<ATT>Among the items</ATT> on the table, which one is the <REL>closest</REL> to the person wearing the pink apron <POS>on the left side of</POS> the table in this cooking class scene? <choice>(a) water glass, (b) refrigerator, (c) mirror, (d) green apron woman</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) water glass",
+    "rationale": "The question is exo-centric: Among the options, only the water glass is actually on the table; the refrigerator and the mirror are in the background, and the person in the green apron is not a table item. Since the water glass sits directly in front of the pink-apron person, it is the closest table item. Therefore water glass is correct.",
+    "bbox": [384.07,267.46,45.46,67.47],
+    "view": "exo"
+  },
+  {
+    "image_id": 580542, 
+    "image_path": "\\000000580542.jpg",
+    "image_resolution": "640 x 359",
+    "question": "Which <ATT>object that can hold water</ATT> is the <REL>closest</REL> to the pizza placed in front of the woman <POS>on the left</POS>? <choice>(a) fork, (b) empty glass, (c) blue vase, (d) water glass</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(b) empty glass",
+    "rationale": "The question is exo-centric: the fork is physically the closest, but it cannot hold water so it is excluded. The blue vase and water glass are closer to the woman on the right side. The empty glass is very close to the pizza in front of the left woman, therefore the empty glass is correct.",
+    "bbox": [288.2,206.8,43.94,127.65],
+    "view": "exo"
+  },
+  {
+    "image_id": 580741,
+    "image_path": "\\000000580741.jpg",
+    "image_resolution": "640 x 368",
+    "question": "<POS>On the right side</POS> of the image <ATT>among the square or rectangular objects</ATT>, which one is the object that is the <REL>farthest</REL> from the framed painting of a woman in a red dress on the purple wall? <choice>(a) book, (b) red hoodie man, (c) white cushion, (d) dog </choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) book",
+    "rationale": "The man and the dog wearing the red hoodie are not rectangular objects. The white cushion and the book are square or rectangular objects. The cushion is on the right sofa, but the book is on the table a little farther away than the white cushion.",
+    "bbox": [403.38,280.39,47.4,33.65],
+    "view": "exo"
+  },
+  {
+    "image_id": 580791,
+    "image_path": "\\000000580791.jpg",
+    "image_resolution": "640 x 429",
+    "question": "<ATT>Which non-edible item</ATT> is the <REL>closest</REL> to the person holding the fork <POS>on the left side of</POS> the table? <choice>(a) knife, (b) pizza, (c) bottle, (d) cup</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) knife",
+    "rationale": "The question is exo-centric: Pizza is edible so it must not be considered as a candidate object. The knife is placed immediately next to the fork, whereas the bottle and the cup are further away on the table. Therefore the knife is the closest non-edible object to the person holding the fork.",
+    "bbox": [0,197.96,144.48,31.47],
+    "view": "exo"
+  }
+]

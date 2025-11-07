@@ -1,0 +1,1776 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>COCO Annotation Tool</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0;
+            padding: 10px;
+            padding-bottom: 50px; /* 상태 바 공간 확보 */
+        }
+        h1 {
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+            margin-top: 5px;
+            text-align: center;
+        }
+        .container { 
+            display: flex; 
+            gap: 20px;
+            flex-direction: row;
+        }
+        .image-panel { 
+            flex: 2; 
+            min-width: 0; /* flex 축소 허용 */
+        }
+        .control-panel { 
+            flex: 1; 
+            min-width: 350px;
+            display: flex;
+            gap: 15px;
+            flex-direction: row;
+        }
+        .control-panel-left {
+            flex: 1;
+            min-width: 280px;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+        .control-panel-right {
+            flex: 1;
+            min-width: 280px;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+        .image-container { 
+            border: 2px solid #ccc; 
+            position: relative; 
+            display: inline-block;
+            width: 100%;
+            max-width: 100%;
+        }
+        #image { 
+            max-width: 100%; 
+            height: auto;
+            display: block; 
+        }
+        .bbox { 
+            position: absolute; 
+            border: 2px solid rgba(255, 0, 0, 0.7); 
+            background-color: rgba(255, 0, 0, 0.1);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            z-index: 10;
+        }
+        .bbox:hover { 
+            border-color: rgba(255, 255, 0, 0.9);
+            background-color: rgba(255, 255, 0, 0.2);
+            transform: scale(1.05);
+            box-shadow: 0 0 10px rgba(255, 255, 0, 0.5);
+            z-index: 20;
+        }
+        .bbox.selected { 
+            border-color: rgba(0, 0, 255, 0.9);
+            background-color: rgba(0, 0, 255, 0.2);
+            border-width: 3px;
+        }
+        .bbox.selected:hover { 
+            border-color: rgba(0, 255, 255, 0.9);
+            background-color: rgba(0, 255, 255, 0.3);
+        }
+        .bbox-label {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 2px 5px;
+            font-size: 11px;
+            white-space: nowrap;
+            display: none;
+            pointer-events: none;
+        }
+        .bbox:hover .bbox-label {
+            display: block;
+        }
+        .bbox.hidden {
+            display: none !important;
+        }
+        .form-group { margin-bottom: 10px; }
+        label { 
+            display: block; 
+            font-weight: bold; 
+            margin-bottom: 3px; 
+            font-size: 0.85rem;
+        }
+        textarea, input { 
+            width: 100%; 
+            padding: 6px; 
+            border: 1px solid #ccc; 
+            font-size: 0.85rem;
+            resize: vertical;
+        }
+        button { 
+            padding: 10px 15px; 
+            margin: 5px; 
+            border: none; 
+            cursor: pointer;
+            font-size: 0.9rem;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        .btn-save { background-color: lightgreen; }
+        .btn-nav { background-color: lightblue; }
+        .btn-clear { 
+            background-color: #ffcccc; 
+            margin-top: 5px;
+        }
+        .search-container {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .search-input {
+            flex: 1;
+            min-width: 0;
+        }
+        .search-button {
+            flex-shrink: 0;
+            padding: 6px 12px;
+            font-size: 0.85rem;
+        }
+        .bbox-toggle-inline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            background-color: #e8f5e9;
+            border-radius: 4px;
+            border: 2px solid #4CAF50;
+            flex-shrink: 0;
+        }
+        .bbox-toggle-inline input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin: 0;
+            flex-shrink: 0;
+        }
+        .bbox-toggle-inline label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            margin: 0;
+            cursor: pointer;
+            white-space: nowrap;
+            user-select: none;
+            color: #2e7d32;
+        }
+        .image-id-container {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        .image-id-label-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .image-id-input-container {
+            flex: 1;
+            min-width: 0;
+        }
+        .radio-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 5px;
+        }
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .radio-label {
+            font-weight: normal;
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+        .button-group {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .button-group button {
+            flex: 1;
+            min-width: 80px;
+        }
+        .image-info {
+            font-size: 0.75rem;
+            line-height: 1.3;
+            padding: 6px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+        .bbox-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            flex-shrink: 0;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            flex-shrink: 0;
+            z-index: 1;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.3s;
+            border-radius: 24px;
+            border: 1px solid #999;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #4CAF50;
+        }
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        /* 인라인 스타일로 추가된 토글 슬라이더용 */
+        #toggleSlider:before {
+            content: "";
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        #bboxToggle:checked ~ #toggleSlider {
+            background-color: #4CAF50;
+        }
+        #bboxToggle:checked ~ #toggleSlider:before {
+            transform: translateX(26px);
+        }
+        .toggle-label {
+            font-size: 0.9rem;
+            font-weight: normal;
+            margin: 0;
+            cursor: pointer;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .status { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            background: #f0f0f0; 
+            padding: 6px; 
+            border-top: 1px solid #ccc;
+            font-size: 0.75rem;
+            z-index: 1000;
+            box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+        }
+        
+        /* 반응형 디자인 - 태블릿 및 모바일 */
+        @media screen and (max-width: 1024px) {
+            .container {
+                flex-direction: column;
+            }
+            .control-panel {
+                flex-direction: column;
+            }
+            .image-panel {
+                flex: 1;
+            }
+            .control-panel {
+                flex: 1;
+                min-width: 100%;
+            }
+            h1 {
+                font-size: 1.3rem;
+            }
+        }
+        
+        @media screen and (max-width: 768px) {
+            body {
+                padding: 10px;
+                padding-bottom: 70px;
+            }
+            h1 {
+                font-size: 1.2rem;
+                margin-bottom: 15px;
+            }
+            .container {
+                gap: 15px;
+            }
+            .form-group {
+                margin-bottom: 12px;
+            }
+            label {
+                font-size: 0.85rem;
+            }
+            textarea, input {
+                font-size: 0.85rem;
+                padding: 6px;
+            }
+            button {
+                padding: 8px 12px;
+                font-size: 0.85rem;
+                margin: 3px;
+            }
+            .status {
+                padding: 8px;
+                font-size: 0.85rem;
+            }
+            .bbox-label {
+                font-size: 10px;
+            }
+            .search-container {
+                gap: 4px;
+            }
+            .radio-group {
+                gap: 10px;
+            }
+            .image-info {
+                font-size: 0.85rem;
+                padding: 6px;
+            }
+        }
+        
+        @media screen and (max-width: 480px) {
+            body {
+                padding: 8px;
+                padding-bottom: 60px;
+            }
+            h1 {
+                font-size: 1.1rem;
+                margin-bottom: 10px;
+            }
+            .container {
+                gap: 10px;
+            }
+            .form-group {
+                margin-bottom: 10px;
+            }
+            label {
+                font-size: 0.8rem;
+            }
+            .button-group {
+                gap: 3px;
+            }
+            .button-group button {
+                padding: 6px 10px;
+                font-size: 0.8rem;
+                margin: 0;
+                flex: 1;
+                min-width: 70px;
+            }
+            .radio-group {
+                gap: 8px;
+            }
+            .image-info {
+                font-size: 0.8rem;
+                padding: 5px;
+            }
+            .btn-clear {
+                width: 100%;
+                margin-top: 5px;
+            }
+            .status {
+                padding: 6px;
+                font-size: 0.8rem;
+            }
+            .search-container {
+                gap: 3px;
+            }
+            .search-button {
+                padding: 6px 12px;
+            }
+            .bbox-toggle-container {
+                margin: 0;
+            }
+            .toggle-switch {
+                width: 45px;
+                height: 22px;
+            }
+            .toggle-slider:before {
+                height: 16px;
+                width: 16px;
+            }
+            .toggle-switch input:checked + .toggle-slider:before {
+                transform: translateX(23px);
+            }
+            .toggle-label {
+                font-size: 0.85rem;
+            }
+            .form-group > div[style*="display: flex"] {
+                flex-wrap: wrap;
+                gap: 8px !important;
+            }
+        }
+        /* === 추가: 스크롤 포커스 강조 === */
+        .bbox.focused {
+            border-color: rgba(0, 255, 255, 0.95) !important;
+            background-color: rgba(0, 255, 255, 0.15) !important;
+            box-shadow: 0 0 12px rgba(0, 255, 255, 0.7);
+            border-width: 3px;
+        }
+        /* 포커스된 박스는 좌표 라벨 항상 표시 */
+        .bbox.focused .bbox-label {
+        display: block !important;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>MS-COCO Annotation Tool (Web Version)</h1>
+    
+    <div class="container">
+        <div class="image-panel">
+            <div class="image-container" id="imageContainer">
+                <img id="image" src="" alt="COCO Image">
+            </div>
+        </div>
+        
+        <div class="control-panel">
+            <!-- 왼쪽 패널: 새로운 입력 폼들 -->
+            <div class="control-panel-left">
+                <!-- 노란색 칸: Question 한글 입력 -->
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="questionKo" style="font-size: 0.8rem; margin-bottom: 2px;">Question (한글): 
+                        <span style="color: red;">*</span></label>
+                    <textarea id="questionKo" rows="8" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;" placeholder="한글 질문을 입력하세요"></textarea>
+                </div>
+                
+                <!-- 초록색 칸: Choice a~d 입력 -->
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.8rem; margin-bottom: 2px;">Choices (객관식 선지): 
+                        <span style="color: red;">*</span></label>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <input type="radio" id="choiceCheckA" name="choiceCheck" value="a" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
+                            <label for="choiceA" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(a):</label>
+                            <input id="choiceA" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 a 입력">
+                        </div>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <input type="radio" id="choiceCheckB" name="choiceCheck" value="b" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
+                            <label for="choiceB" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(b):</label>
+                            <input id="choiceB" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 b 입력">
+                        </div>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <input type="radio" id="choiceCheckC" name="choiceCheck" value="c" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
+                            <label for="choiceC" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(c):</label>
+                            <input id="choiceC" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 c 입력">
+                        </div>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <input type="radio" id="choiceCheckD" name="choiceCheck" value="d" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
+                            <label for="choiceD" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(d):</label>
+                            <input id="choiceD" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 d 입력">
+                        </div>
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                        <button type="button" onclick="translateChoices()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap;">번역</button>
+                    </div>
+                </div>
+                
+                <!-- 빨간색 칸: Rationale 한글 입력 -->
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="rationaleKo" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale (한글):</label>
+                    <textarea id="rationaleKo" rows="8" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;" placeholder="한글 근거를 입력하세요"></textarea>
+                    <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px;">
+                        <button type="button" onclick="translateRationale()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap;">번역</button>
+                        <button type="button" onclick="reviewTranslation()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; display: none;">검수</button>
+                    </div>
+                    <div id="reviewResultContainer" style="display: none; margin-top: 8px;">
+                        <div id="reviewOKMessage" style="display: none; color: #4CAF50; font-weight: bold; font-size: 0.8rem; margin-bottom: 4px;">✓ OK</div>
+                        <label style="font-size: 0.75rem; margin-bottom: 2px; color: #666;">검수 결과 (수정된 문장):</label>
+                        <textarea id="reviewResult" rows="6" style="width: 100%; padding: 5px; font-size: 0.75rem; line-height: 1.4; border: 1px solid #ccc; background-color: #f9f9f9;" placeholder="검수 결과가 여기에 표시됩니다." readonly></textarea>
+                        <div style="display: flex; gap: 4px; margin-top: 4px;">
+                            <button type="button" onclick="applyReviewResult()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">적용</button>
+                            <button type="button" onclick="closeReviewResult()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; background-color: #999; color: white; border: none; border-radius: 3px; cursor: pointer;">닫기</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 오른쪽 패널: 기존 폼들 -->
+            <div class="control-panel-right">
+                <!-- === 추가: Bbox 표시/숨김 토글과 Image ID를 같은 줄에 배치 === -->
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: nowrap;">
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 6px; background-color: #e8f5e9; border-radius: 4px; border: 2px solid #4CAF50; flex-shrink: 0;">
+                            <input type="checkbox" id="bboxToggle" checked onchange="toggleBboxes()" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
+                            <label for="bboxToggle" style="font-size: 0.75rem; font-weight: 700; margin: 0; cursor: pointer; white-space: nowrap; user-select: none; color: #2e7d32;">Bbox</label>
+                        </div>
+                        <label for="searchId" style="margin: 0; margin-right: 4px; font-size: 0.75rem; flex-shrink: 0;">Image ID:</label>
+                        <div style="flex: 1; min-width: 0; display: flex; gap: 4px;">
+                            <input id="searchId" type="number" placeholder="ex 184613" style="flex: 1; min-width: 0; padding: 4px; font-size: 0.75rem;">
+                            <button onclick="jumpToId()" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">Go</button>
+                        </div>
+                    </div>
+                </div>  
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.75rem; margin-bottom: 2px;">Image Info:</label>
+                    <div id="imageInfo" style="font-size: 0.7rem; line-height: 1.2; padding: 4px; background-color: #f9f9f9; border-radius: 4px; border: 1px solid #e0e0e0;">Loading...</div>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="question" style="font-size: 0.8rem; margin-bottom: 2px;">Question: 
+                        <span style="color: red;">*</span></label>
+                    <textarea id="question" rows="5" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;"></textarea>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="response" style="font-size: 0.8rem; margin-bottom: 2px;">Response: 
+                        <span style="color: red;">*</span></label>
+                    <textarea id="response" rows="1" style="padding: 5px; font-size: 0.8rem; min-height: 28px; height: 28px;"></textarea>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="rationale" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale:</label>
+                    <textarea id="rationale" rows="5" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;"></textarea>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label style="font-size: 0.8rem; margin-bottom: 2px;">View: <span style="color: red;">*</span></label>
+                    <div style="display: flex; gap: 12px; margin-top: 3px;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="radio" id="viewExo" name="view" value="exo">
+                            <label for="viewExo" style="font-weight: normal; margin-bottom: 0; cursor: pointer; font-size: 0.8rem;">Exo</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="radio" id="viewEgo" name="view" value="ego">
+                            <label for="viewEgo" style="font-weight: normal; margin-bottom: 0; cursor: pointer; font-size: 0.8rem;">Ego</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="selectedBboxes" style="font-size: 0.8rem; margin-bottom: 2px;">Selected Bounding Boxes: 
+                        <span style="color: red;">*</span></label>
+                    <textarea id="selectedBboxes" rows="2" readonly style="padding: 5px; font-size: 0.75rem;"></textarea>
+                    <button onclick="clearBboxes()" class="btn-clear" style="margin-top: 4px; padding: 5px 10px; font-size: 0.75rem;">Clear Bboxes</button>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        <button class="btn-nav" onclick="previousImage()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Previous</button>
+                        <button class="btn-nav" onclick="nextImage()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Next</button>
+                        <button class="btn-save" onclick="saveAnnotation()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="status" id="status">Ready</div>
+
+    <script>
+        let currentIndex = 0;
+        let currentImageData = null;
+        let selectedBboxes = [];
+        let bboxElements = [];
+        
+        // Bbox 표시/숨김 토글 함수
+        function toggleBboxes() {
+            const toggle = document.getElementById('bboxToggle');
+            if (!toggle) {
+                console.error('bboxToggle element not found');
+                return;
+            }
+            
+            const isVisible = toggle.checked;
+            const container = toggle.closest('div[style*="background-color"]');
+            
+            // 컨테이너 스타일 업데이트
+            if (container) {
+                if (isVisible) {
+                    container.style.backgroundColor = '#e8f5e9';
+                    container.style.borderColor = '#4CAF50';
+                } else {
+                    container.style.backgroundColor = '#ffebee';
+                    container.style.borderColor = '#f44336';
+                }
+            }
+            
+            // bbox 표시/숨김
+            bboxElements.forEach(el => {
+                if (isVisible) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            });
+            
+        }
+        // === 추가 전역 ===
+        let focusedBboxIndex = null;  // currentImageData.bboxes 기준 인덱스
+        
+        // 질문에서 기준 객체와 선택지 객체 추출
+
+        let isInitialLoad = true;
+        
+        function loadImage(index) {
+            // 첫 로드 시 localStorage 확인
+            if (isInitialLoad) {
+                isInitialLoad = false;
+                const stored = localStorage.getItem('lastImageIndex');
+                if (stored !== null && stored !== '' && stored !== 'undefined' && index === 0) {
+                    const storedIndex = parseInt(stored, 10);
+                    if (!isNaN(storedIndex) && storedIndex >= 0 && storedIndex !== 0) {
+                        setTimeout(() => {
+                            loadImage(storedIndex);
+                        }, 50);
+                        return;
+                    }
+                }
+            }
+            
+            fetch(`/api/image/${index}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        console.error('API returned error:', data.error);
+                        document.getElementById('imageInfo').innerHTML = 
+                            `Error: ${data.error}`;
+                        alert(data.error);
+                        return;
+                    }
+                    
+                    // Image data received
+                    
+                    currentImageData = data;
+                    currentIndex = index;
+                    
+                    // 마지막 작업한 이미지 인덱스 저장
+                    localStorage.setItem('lastImageIndex', index.toString());
+                    
+                    // Update image
+                    const img = document.getElementById('image');
+                    if (!data.image_data) {
+                        console.error('No image_data in response');
+                        document.getElementById('imageInfo').innerHTML = 
+                            `Error: No image data received`;
+                        return;
+                    }
+                    
+                    img.src = data.image_data;
+                    
+                    // Handle image load error
+                    img.onerror = () => {
+                        console.error('Failed to load image from base64 data');
+                        document.getElementById('imageInfo').innerHTML = 
+                            `Error: Failed to load image`;
+                    };
+                    
+                    // Wait for image to load before drawing bboxes
+                    img.onload = () => {
+                        // 정답 bbox 좌표 가져오기 (existing_annotation이 있으면)
+                        const correctAnswerBbox = data.existing_annotation && data.existing_annotation.bbox 
+                            ? data.existing_annotation.bbox 
+                            : null;
+                        drawBboxes();
+                    };
+                    
+                    // Update info
+                    document.getElementById('imageInfo').innerHTML = 
+                        `Image ${index + 1}/${data.total_images}<br>` +
+                        `ID: ${data.image_id}<br>` +
+                        `Original Size: ${data.width}x${data.height}<br>` +
+                        `Display Size: ${data.display_width}x${data.display_height}<br>` +
+                        `File: ${data.file_name}`;
+                    
+                    // Load existing annotation
+                    if (data.existing_annotation) {
+                        const existingQuestion = data.existing_annotation.question || '';
+                        const existingResponse = data.existing_annotation.response || '';
+                        const existingRationale = data.existing_annotation.rationale || '';
+                        
+                        // 기존 필드에 값 설정
+                        document.getElementById('question').value = existingQuestion;
+                        document.getElementById('response').value = existingResponse;
+                        document.getElementById('rationale').value = existingRationale;
+                        
+                        // 새로운 필드에 값 설정
+                        document.getElementById('questionKo').value = existingQuestion;
+                        document.getElementById('rationaleKo').value = existingRationale;
+                        
+                        // Choice 태그에서 선지 추출
+                        const choiceMatch = existingQuestion.match(/<choice>(.*?)<\/choice>/i);
+                        if (choiceMatch) {
+                            const choiceText = choiceMatch[1];
+                            const choices = choiceText.split(',').map(c => c.trim());
+                            if (choices.length >= 4) {
+                                document.getElementById('choiceA').value = choices[0].replace(/^\(a\)\s*/i, '').trim();
+                                document.getElementById('choiceB').value = choices[1].replace(/^\(b\)\s*/i, '').trim();
+                                document.getElementById('choiceC').value = choices[2].replace(/^\(c\)\s*/i, '').trim();
+                                document.getElementById('choiceD').value = choices[3].replace(/^\(d\)\s*/i, '').trim();
+                            }
+                        }
+                        
+                        // bbox 처리: 배열의 배열이거나 단일 배열일 수 있음
+                        let bboxData = data.existing_annotation.bbox || [];
+                        if (bboxData.length > 0) {
+                            // 첫 번째 요소가 숫자면 단일 bbox [x,y,w,h] -> [[x,y,w,h]]로 변환
+                            if (typeof bboxData[0] === 'number') {
+                                selectedBboxes = [bboxData];
+                            } else {
+                                // 이미 배열의 배열 형태
+                                selectedBboxes = bboxData;
+                            }
+                        } else {
+                            selectedBboxes = [];
+                        }
+                        
+                        // Set view radio button
+                        const view = data.existing_annotation.view || '';
+                        if (view === 'exo') {
+                            document.getElementById('viewExo').checked = true;
+                        } else if (view === 'ego') {
+                            document.getElementById('viewEgo').checked = true;
+                        }
+                    } else {
+                        // 기존 필드 초기화
+                        document.getElementById('question').value = '';
+                        document.getElementById('response').value = '';
+                        document.getElementById('rationale').value = '';
+                        
+                        // 새로운 필드 초기화
+                        document.getElementById('questionKo').value = '';
+                        document.getElementById('rationaleKo').value = '';
+                        document.getElementById('choiceA').value = '';
+                        document.getElementById('choiceB').value = '';
+                        document.getElementById('choiceC').value = '';
+                        document.getElementById('choiceD').value = '';
+                        
+                        selectedBboxes = [];
+                        
+                        // 이미지가 있는 폴더에 따라 view 자동 설정
+                        if (data.view_type) {
+                            if (data.view_type === 'exo') {
+                                document.getElementById('viewExo').checked = true;
+                                document.getElementById('viewEgo').checked = false;
+                            } else if (data.view_type === 'ego') {
+                                document.getElementById('viewEgo').checked = true;
+                                document.getElementById('viewExo').checked = false;
+                            }
+                        } else {
+                            // Clear view radio buttons
+                            document.getElementById('viewExo').checked = false;
+                            document.getElementById('viewEgo').checked = false;
+                        }
+                    }
+                    
+                    updateBboxDisplay();
+                    updateStatus();
+                    drawBboxes();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to load image');
+                });
+        }
+
+        function drawBboxes() {
+            // Clear existing bboxes
+            bboxElements.forEach(el => el.remove());
+            bboxElements = [];
+            
+            if (!currentImageData) {
+                return;
+            }
+
+            const container = document.getElementById('imageContainer');
+            const img = document.getElementById('image');
+            
+            // 이미지가 실제로 로드되었는지 확인
+            if (!img || !img.complete || img.naturalWidth === 0) {
+                return;
+            }
+            
+            // 서버에서 제공한 scale 사용 (이미지 리사이즈 기준)
+            // 이미지가 리사이즈되지 않았다면 1.0
+            let scale = currentImageData.scale || 1.0;
+            
+            // 이미지가 실제로 리사이즈되었는지 확인
+            const imgNaturalWidth = img.naturalWidth;
+            const imgNaturalHeight = img.naturalHeight;
+            const imgDisplayWidth = img.clientWidth || img.naturalWidth;
+            const imgDisplayHeight = img.clientHeight || img.naturalHeight;
+            
+            // 실제 표시 크기와 원본 크기가 다르면 재계산
+            if (imgNaturalWidth !== imgDisplayWidth || imgNaturalHeight !== imgDisplayHeight) {
+                const scaleX = imgDisplayWidth / (currentImageData.width || imgNaturalWidth);
+                const scaleY = imgDisplayHeight / (currentImageData.height || imgNaturalHeight);
+                scale = Math.min(scaleX, scaleY);
+            }
+            
+            // Draw bboxes
+
+             // 1) 데이터 묶음 만들기 (서버가 anns 주면 그걸 우선 사용)
+            let items = [];
+            if (currentImageData.anns && Array.isArray(currentImageData.anns)) {
+                items = currentImageData.anns.map(a => ({
+                bbox: a.bbox,
+                catId: a.category_id,
+                name: a.category_name || 'unknown'
+                }));
+            } else {
+                const names = currentImageData.category_names || [];
+                const ids   = currentImageData.categories || [];
+                items = (currentImageData.bboxes || []).map((b, i) => ({
+                bbox: b,
+                catId: ids[i],
+                name: (names[i] && String(names[i]).trim()) || 'unknown'
+                }));
+            }
+
+            // 2) 작은 박스가 앞으로 보이도록 면적 오름차순 정렬
+            items.sort((a, b) => (a.bbox[2]*a.bbox[3]) - (b.bbox[2]*b.bbox[3]));
+
+            // 3) 렌더링
+            items.forEach(({ bbox, catId, name }, index) => {
+                // COCO bbox 형식: [x, y, width, height] (절대 좌표)
+                const [x, y, w, h] = bbox;
+
+                // 표시된 이미지 크기에 맞게 스케일링
+                const scaledX = x * scale;
+                const scaledY = y * scale;
+                const scaledW = w * scale;
+                const scaledH = h * scale;
+
+                const div = document.createElement('div');
+                div.className = 'bbox';
+                div.style.left = `${scaledX}px`;
+                div.style.top = `${scaledY}px`;
+                div.style.width = `${scaledW}px`;
+                div.style.height = `${scaledH}px`;
+
+                // 면적 역비례 zIndex(작은 박스 위)
+                const area = w * h;
+                div.style.zIndex = String(1000000 - Math.floor(area));
+
+                // === 라벨: [category_name]: x, y, w, h, catId ===
+                const label = document.createElement('div');
+                label.className = 'bbox-label';
+                label.textContent = `${name}: ${x}, ${y}, ${w}, ${h}, ${catId ?? ''}`;
+                div.appendChild(label);
+
+                // 선택 상태/클릭 핸들러(기존 로직 유지)
+                if (selectedBboxes.some(sb => JSON.stringify(sb) === JSON.stringify(bbox))) {
+                div.classList.add('selected');
+                }
+                div.addEventListener('click', (e) => {
+                e.stopPropagation();
+                selectBbox(bbox, div);
+                });
+
+                container.appendChild(div);
+                bboxElements.push(div);
+            });
+            
+            // 토글 상태에 따라 초기 표시/숨김 설정
+            const toggleCheck = document.getElementById('bboxToggle');
+            if (toggleCheck && !toggleCheck.checked) {
+                bboxElements.forEach(el => el.classList.add('hidden'));
+            }
+
+            // 포커스 초기화는 네 설정에 따라 유지/삭제
+            focusedBboxIndex = null;
+            // ensureInitialFocus();  // 자동포커스 원치 않으면 주석
+                        
+            currentImageData.bboxes.forEach((bbox, index) => {
+                const [x, y, w, h] = bbox;
+                
+                // Scale bbox coordinates to match displayed image size
+                const scaledX = x * scale;
+                const scaledY = y * scale;
+                const scaledW = w * scale;
+                const scaledH = h * scale;
+                
+                const div = document.createElement('div');
+                div.className = 'bbox';
+                div.style.left = `${scaledX}px`;
+                div.style.top = `${scaledY}px`;
+                div.style.width = `${scaledW}px`;
+                div.style.height = `${scaledH}px`;
+
+                // 면적이 작을수록 더 앞(zIndex 높음)
+                const area = w * h;
+                div.style.zIndex = String(1000000 - Math.floor(area));
+
+                // Add label
+                const label = document.createElement('div');
+                label.className = 'bbox-label';
+
+                const nameList = currentImageData.category_names || [];
+                const categoryName = (nameList[index] && String(nameList[index]).trim()) || 'unknown';
+                const coordStr = `[${x},${y},${w},${h}]`;
+                label.textContent = `${categoryName}: ${coordStr}`;
+
+                div.appendChild(label);
+                
+                // Check if selected
+                if (selectedBboxes.some(sb => 
+                    JSON.stringify(sb) === JSON.stringify(bbox))) {
+                    div.classList.add('selected');
+                }
+                
+                // Add click event
+                div.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectBbox(bbox, div);
+                });
+                
+                container.appendChild(div);
+                bboxElements.push(div);
+            });
+            
+            // 토글 상태에 따라 초기 표시/숨김 설정 (두 번째 루프에도 적용)
+            const toggleCheck2 = document.getElementById('bboxToggle');
+            if (toggleCheck2 && !toggleCheck2.checked) {
+                bboxElements.forEach(el => el.classList.add('hidden'));
+            }
+
+            // === 추가: 이미지 로드/리드로우 후 초기 포커스 설정 ===
+            focusedBboxIndex = null;
+            // ensureInitialFocus(); // 자동포커스 원치 않으면 주석
+        }
+
+        function selectBbox(bbox, element) {
+            const bboxStr = JSON.stringify(bbox);
+            const existingIndex = selectedBboxes.findIndex(sb => 
+                JSON.stringify(sb) === bboxStr);
+            
+            if (existingIndex === -1) {
+                selectedBboxes.push(bbox);
+                element.classList.add('selected');
+            } else {
+                selectedBboxes.splice(existingIndex, 1);
+                element.classList.remove('selected');
+            }
+            
+            updateBboxDisplay();
+            updateStatus();
+        }
+
+        function updateBboxDisplay() {
+            const display = selectedBboxes.map(bbox => 
+                `[${bbox.join(',')}]`).join(', ');
+            document.getElementById('selectedBboxes').value = display;
+        }
+
+        function clearBboxes() {
+            selectedBboxes = [];
+            updateBboxDisplay();
+            drawBboxes();
+        }
+
+        function previousImage() {
+            if (currentIndex > 0) {
+                loadImage(currentIndex - 1);
+            }
+        }
+
+        function nextImage() {
+            loadImage(currentIndex + 1);
+        }
+
+        function saveAnnotation() {
+            // 새로운 입력 필드에서 값 가져오기
+            const questionKo = document.getElementById('questionKo').value.trim();
+            const choiceA = document.getElementById('choiceA').value.trim();
+            const choiceB = document.getElementById('choiceB').value.trim();
+            const choiceC = document.getElementById('choiceC').value.trim();
+            const choiceD = document.getElementById('choiceD').value.trim();
+            const rationaleKo = document.getElementById('rationaleKo').value.trim();
+            
+            // 기존 필드에서도 값 가져오기 (호환성을 위해)
+            const question = document.getElementById('question').value.trim() || questionKo;
+            const response = document.getElementById('response').value.trim();
+            const rationale = document.getElementById('rationale').value.trim() || rationaleKo;
+            
+            // Get selected view
+            const viewRadios = document.getElementsByName('view');
+            let selectedView = '';
+            for (let radio of viewRadios) {
+                if (radio.checked) {
+                    selectedView = radio.value;
+                    break;
+                }
+            }
+            
+            // Client-side validation
+            const missingFields = [];
+            if (!question) missingFields.push('question');
+            if (!response) missingFields.push('response');
+            if (!choiceA || !choiceB || !choiceC || !choiceD) missingFields.push('choices (a, b, c, d)');
+            if (!selectedView) missingFields.push('view');
+            if (selectedBboxes.length === 0) missingFields.push('bbox');
+            
+            if (missingFields.length > 0) {
+                alert(`Please fill in the following required fields: ` +
+                      `${missingFields.join(', ')}`);
+                return;
+            }
+            
+            // Choice 태그 형식으로 question 생성 (이미 번역된 question이 있으면 그대로 사용)
+            let finalQuestion = question;
+            if (choiceA && choiceB && choiceC && choiceD && !finalQuestion.includes('<choice>')) {
+                // choice 태그가 없으면 추가
+                finalQuestion += ` <choice>(a) ${choiceA}, (b) ${choiceB}, (c) ${choiceC}, (d) ${choiceD}</choice> And provide the bounding box coordinate of the region related to your answer.`;
+            }
+            
+            const data = {
+                image_id: currentImageData.image_id,
+                question: finalQuestion,
+                response: response,
+                rationale: rationale,
+                view: selectedView,
+                selected_bboxes: selectedBboxes
+            };
+            
+            fetch('/api/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    // 저장 시 현재 이미지 인덱스도 저장
+                    if (currentIndex !== undefined && currentIndex !== null) {
+                        localStorage.setItem('lastImageIndex', currentIndex.toString());
+                    }
+                    const message = result.updated ? 'Annotation updated successfully!' : 'Annotation saved successfully!';
+                    alert(message);
+                    // 저장 후 현재 이미지에 머물러 있음 (다음 이미지로 자동 이동하지 않음)
+                    // 사용자가 원할 때 수동으로 이동 가능
+                } else {
+                    if (result.missing_fields) {
+                        alert(`Server validation failed: ${result.message}`);
+                    } else {
+                        alert('Failed to save: ' + result.error);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to save annotation');
+            });
+        }
+
+        function updateStatus() {
+            document.getElementById('status').textContent = 
+                `Current: ${currentIndex + 1} | Selected bboxes: ` +
+                `${selectedBboxes.length}`;
+        }
+
+        // === 스크롤로 포커스 이동 ===
+        (function bindWheel() {
+            const attach = () => {
+                const c = document.getElementById('imageContainer');
+                if (!c) return setTimeout(attach, 150);
+                c.addEventListener('wheel', (e) => {
+                    e.preventDefault(); // 페이지 스크롤 방지
+                    if (e.deltaY < 0) moveFocusVertical(-1);
+                    else if (e.deltaY > 0) moveFocusVertical(1);
+                }, { passive: false });
+            };
+            attach();
+        })();
+
+        // === 더블클릭으로 현재 포커스 선택/해제 ===
+        (function bindDblClick() {
+        const attach = () => {
+            const c = document.getElementById('imageContainer');
+            if (!c) return setTimeout(attach, 150);
+            c.addEventListener('dblclick', (e) => {
+            if (focusedBboxIndex !== null && currentImageData) {
+                const el = bboxElements[focusedBboxIndex];
+                selectBbox(currentImageData.bboxes[focusedBboxIndex], el);
+            }
+            });
+        };
+        attach();
+        })();
+
+        // Auto-save function
+        function autoSave() {
+            // 새로운 입력 필드에서 값 가져오기
+            const questionKo = document.getElementById('questionKo').value.trim();
+            const choiceA = document.getElementById('choiceA').value.trim();
+            const choiceB = document.getElementById('choiceB').value.trim();
+            const choiceC = document.getElementById('choiceC').value.trim();
+            const choiceD = document.getElementById('choiceD').value.trim();
+            const rationaleKo = document.getElementById('rationaleKo').value.trim();
+            
+            // 기존 필드에서도 값 가져오기
+            const question = document.getElementById('question').value.trim() || questionKo;
+            const response = document.getElementById('response').value.trim();
+            const rationale = document.getElementById('rationale').value.trim() || rationaleKo;
+            
+            // Get selected view
+            const viewRadios = document.getElementsByName('view');
+            let selectedView = '';
+            for (let radio of viewRadios) {
+                if (radio.checked) {
+                    selectedView = radio.value;
+                    break;
+                }
+            }
+            
+            // Choice 태그 형식으로 question 생성
+            let finalQuestion = question;
+            if (choiceA && choiceB && choiceC && choiceD && !finalQuestion.includes('<choice>')) {
+                finalQuestion += ` <choice>(a) ${choiceA}, (b) ${choiceB}, (c) ${choiceC}, (d) ${choiceD}</choice> And provide the bounding box coordinate of the region related to your answer.`;
+            }
+            
+            // Only auto-save if all required fields are filled
+            if (currentImageData && question && response && 
+                choiceA && choiceB && choiceC && choiceD &&
+                selectedView && selectedBboxes.length > 0) {
+                const data = {
+                    image_id: currentImageData.image_id,
+                    question: finalQuestion,
+                    response: response,
+                    rationale: rationale,
+                    view: selectedView,
+                    selected_bboxes: selectedBboxes
+                };
+                
+                fetch('/api/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        // 자동 저장 시에도 현재 이미지 인덱스 저장
+                        if (currentIndex !== undefined && currentIndex !== null) {
+                            localStorage.setItem('lastImageIndex', currentIndex.toString());
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Auto-save error:', error);
+                });
+            }
+        }
+
+        function focusBboxByIndex(idx) {
+            bboxElements.forEach(el => el.classList.remove('focused'));
+            if (idx == null || idx < 0 || !bboxElements[idx]) {
+                focusedBboxIndex = null;
+                return;
+            }
+            bboxElements[idx].classList.add('focused');
+            focusedBboxIndex = idx;
+        }
+
+        function bboxCenterY(b) { return b[1] + b[3] / 2; }
+        function bboxCenterX(b) { return b[0] + b[2] / 2; }
+
+        /* 박스 자동 포커스
+        function ensureInitialFocus() {
+            if (!currentImageData || !currentImageData.bboxes || currentImageData.bboxes.length === 0) return;
+            if (focusedBboxIndex !== null) return;
+
+            const cx = currentImageData.width / 2;
+            const cy = currentImageData.height / 2;
+            let best = { idx: 0, dist: Infinity };
+            currentImageData.bboxes.forEach((b, i) => {
+                const dx = bboxCenterX(b) - cx;
+                const dy = bboxCenterY(b) - cy;
+                const d2 = dx*dx + dy*dy;
+                if (d2 < best.dist) best = { idx: i, dist: d2 };
+            });
+            focusBboxByIndex(best.idx);
+        } */
+
+        function moveFocusVertical(direction) {
+            // direction: -1 (위), +1 (아래)
+            if (!currentImageData || !currentImageData.bboxes || currentImageData.bboxes.length === 0) return;
+
+            // ensureInitialFocus();
+            const bboxes = currentImageData.bboxes;
+            const curIdx = (focusedBboxIndex == null) ? 0 : focusedBboxIndex;
+            const cur = bboxes[curIdx];
+            const cy = bboxCenterY(cur);
+            const cx = bboxCenterX(cur);
+
+            const candidates = [];
+            for (let i = 0; i < bboxes.length; i++) {
+                if (i === curIdx) continue;
+                const by = bboxCenterY(bboxes[i]);
+                const bx = bboxCenterX(bboxes[i]);
+                const dy = by - cy;
+                if ((direction < 0 && dy < 0) || (direction > 0 && dy > 0)) {
+                    const primary = Math.abs(dy);
+                    const secondary = Math.abs(bx - cx);
+                    candidates.push({ i, primary, secondary });
+                }
+            }
+
+            if (candidates.length === 0) {
+                // 래핑: 반대 끝에서 가장 가까운 후보
+                let best = { i: 0, primary: Infinity, secondary: Infinity };
+                for (let i = 0; i < bboxes.length; i++) {
+                    if (i === curIdx) continue;
+                    const primary = Math.abs(bboxCenterY(bboxes[i]) - cy);
+                    const secondary = Math.abs(bboxCenterX(bboxes[i]) - cx);
+                    if (primary < best.primary || (primary === best.primary && secondary < best.secondary)) {
+                        best = { i, primary, secondary };
+                    }
+                }
+                focusBboxByIndex(best.i);
+                return;
+            }
+
+            candidates.sort((a, b) => (a.primary - b.primary) || (a.secondary - b.secondary));
+            focusBboxByIndex(candidates[0].i);
+        }
+
+        function jumpToId() {
+            const v = parseInt(document.getElementById('searchId').value, 10);
+            if (isNaN(v)) {
+                alert('숫자 ID를 입력해주세요.');
+                return;
+            }
+            fetch(`/api/find/${v}`)
+            .then(r => {
+                if (!r.ok) {
+                    throw new Error(`HTTP error! status: ${r.status}`);
+                }
+                return r.json();
+            })
+            .then(d => {
+                if (d.error) {
+                    console.error('API error:', d.error);
+                    alert(`Error: ${d.error}`);
+                    return;
+                }
+                if (d.index !== undefined) {
+                    loadImage(d.index);
+                } else {
+                alert(d.error || '해당 ID를 찾지 못했습니다.');
+                }
+            })
+            .catch(() => alert('검색 중 오류가 발생했습니다.'));
+        }
+
+        // Save on unload
+        window.addEventListener('beforeunload', (e) => {
+            autoSave();
+        });
+
+        // Auto-save every 30 seconds
+        setInterval(autoSave, 30000);
+        
+        // 번역 함수들 (추후 구현)
+        function translateQuestion() {
+            const questionKo = document.getElementById('questionKo').value.trim();
+            if (!questionKo) {
+                alert('한글 질문을 먼저 입력해주세요.');
+                return;
+            }
+            
+            // 로딩 표시
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '번역 중...';
+            button.disabled = true;
+            
+            fetch('/api/translate/question', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ question_ko: questionKo })
+            })
+            .then(response => response.json())
+            .then(data => {
+                button.textContent = originalText;
+                button.disabled = false;
+                if (data.success) {
+                    document.getElementById('question').value = data.translated_question;
+                    updateStatus('Question 번역 완료');
+                } else {
+                    alert('번역 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                button.textContent = originalText;
+                button.disabled = false;
+                console.error('Translation error:', error);
+                alert('번역 중 오류가 발생했습니다.');
+            });
+        }
+        
+        function translateChoices() {
+            const questionKo = document.getElementById('questionKo').value.trim();
+            const choiceA = document.getElementById('choiceA').value.trim();
+            const choiceB = document.getElementById('choiceB').value.trim();
+            const choiceC = document.getElementById('choiceC').value.trim();
+            const choiceD = document.getElementById('choiceD').value.trim();
+            
+            if (!questionKo) {
+                alert('Question(한글)을 먼저 입력해주세요.');
+                return;
+            }
+            
+            if (!choiceA || !choiceB || !choiceC || !choiceD) {
+                alert('모든 선지를 입력해주세요.');
+                return;
+            }
+            
+            // 선택된 checkbox 확인
+            const selectedCheckboxes = document.querySelectorAll('input[name="choiceCheck"]:checked');
+            if (selectedCheckboxes.length === 0) {
+                alert('답안을 선택해주세요 (checkbox를 선택하세요).');
+                return;
+            }
+            
+            if (!currentImageData || !currentImageData.image_id) {
+                alert('이미지 정보를 찾을 수 없습니다.');
+                return;
+            }
+            
+            // 로딩 표시
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '이미지 분석 중...';
+            button.disabled = true;
+            
+            // 1단계: 이미지 분석 (캐시 확인)
+            fetch(`/api/analyze_image/${currentIndex}`)
+            .then(response => response.json())
+            .then(analysisData => {
+                if (!analysisData.success) {
+                    throw new Error(analysisData.error || '이미지 분석 실패');
+                }
+                
+                button.textContent = '번역 중...';
+                
+                // 선택된 답안 값 가져오기 (한글 근거 생성용)
+                const selectedValue = selectedCheckboxes[0].value; // 첫 번째 선택된 것만 사용
+                
+                // 2단계: 이미지 분석 결과를 참고하여 번역
+                return fetch('/api/translate/question_and_choices', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        question_ko: questionKo,
+                        choice_a: choiceA,
+                        choice_b: choiceB,
+                        choice_c: choiceC,
+                        choice_d: choiceD,
+                        image_id: currentImageData.image_id,
+                        selected_choice: selectedValue  // 선택된 답안 전달
+                    })
+                });
+            })
+            .then(response => response.json())
+            .then(data => {
+                button.textContent = originalText;
+                button.disabled = false;
+                if (data.success) {
+                    // 오른쪽 패널 question에 번역된 전체 question 설정
+                    document.getElementById('question').value = data.translated_question;
+                    
+                    // 선택된 checkbox의 값으로 response 설정
+                    const selectedValue = selectedCheckboxes[0].value; // 첫 번째 선택된 것만 사용
+                    const choiceText = data.choice_texts[selectedValue] || '';
+                    if (choiceText) {
+                        document.getElementById('response').value = `(${selectedValue}) ${choiceText}`;
+                    }
+                    
+                    // 한글 근거 자동 생성 (1차 가공)
+                    if (data.rationale_ko_generated && data.rationale_ko_generated.trim()) {
+                        document.getElementById('rationaleKo').value = data.rationale_ko_generated;
+                        updateStatus('이미지 분석 및 번역 완료, Response 설정 완료, 한글 근거 자동 생성 완료');
+                    } else {
+                        console.warn('한글 근거 생성 실패 또는 빈 결과');
+                        updateStatus('이미지 분석 및 번역 완료, Response 설정 완료 (한글 근거 생성 실패)');
+                    }
+                } else {
+                    alert('번역 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                button.textContent = originalText;
+                button.disabled = false;
+                console.error('Translation error:', error);
+                alert('번역 중 오류가 발생했습니다: ' + error.message);
+            });
+        }
+        
+        function translateRationale() {
+            const rationaleKo = document.getElementById('rationaleKo').value.trim();
+            if (!rationaleKo) {
+                alert('한글 근거를 먼저 입력해주세요.');
+                return;
+            }
+            
+            if (!currentImageData || !currentImageData.image_id) {
+                alert('이미지 정보를 찾을 수 없습니다.');
+                return;
+            }
+            
+            // view 타입 가져오기
+            const viewRadios = document.getElementsByName('view');
+            let viewType = 'exo';
+            for (let radio of viewRadios) {
+                if (radio.checked) {
+                    viewType = radio.value;
+                    break;
+                }
+            }
+            
+            // question과 response 가져오기 (소거법 형식을 위해)
+            const question = document.getElementById('question').value.trim();
+            const response = document.getElementById('response').value.trim();
+            
+            // 로딩 표시
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '번역 중...';
+            button.disabled = true;
+            
+            fetch('/api/translate/rationale', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    rationale_ko: rationaleKo,
+                    image_id: currentImageData.image_id,
+                    view_type: viewType,
+                    question: question,
+                    response: response
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                button.textContent = originalText;
+                button.disabled = false;
+                if (data.success) {
+                    if (data.translated_rationale) {
+                        document.getElementById('rationale').value = data.translated_rationale;
+                        updateStatus('Rationale 번역 완료');
+                    } else {
+                        console.error('translated_rationale이 응답에 없습니다:', data);
+                        alert('번역 결과를 받지 못했습니다. 서버 응답을 확인하세요.');
+                    }
+                } else {
+                    alert('번역 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                button.textContent = originalText;
+                button.disabled = false;
+                console.error('Translation error:', error);
+                alert('번역 중 오류가 발생했습니다.');
+            });
+        }
+        
+        function reviewTranslation() {
+            // 오른쪽 패널의 question, response, rationale 가져오기
+            const question = document.getElementById('question').value.trim();
+            const response = document.getElementById('response').value.trim();
+            const rationale = document.getElementById('rationale').value.trim();
+            
+            if (!question && !rationale) {
+                alert('검수할 내용이 없습니다. Question 또는 Rationale을 먼저 입력해주세요.');
+                return;
+            }
+            
+            // 로딩 표시
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '검수 중...';
+            button.disabled = true;
+            
+            fetch('/api/review_translation', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    question: question,
+                    response: response,
+                    rationale: rationale
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                button.textContent = originalText;
+                button.disabled = false;
+                
+                // 디버깅: 전체 응답 로그
+                
+                if (data.success) {
+                    const reviewContainer = document.getElementById('reviewResultContainer');
+                    const reviewTextarea = document.getElementById('reviewResult');
+                    const reviewOKMessage = document.getElementById('reviewOKMessage');
+                    
+                    if (data.needs_revision) {
+                        // 검수 통과 실패 - 수정된 문장 표시
+                        let reviewText = '';
+                        
+                        // Issues Found 부분 추가
+                        if (data.issues_found && typeof data.issues_found === 'string' && data.issues_found.trim().length > 0) {
+                            reviewText += '=== Issues Found ===\n' + data.issues_found.trim() + '\n\n';
+                        } else {
+                            if (data.review_notes) {
+                                // Issues Found가 없으면 전체 응답을 표시 (Question/Rationale 섹션 제외)
+                                let fullNotes = data.review_notes;
+                                // Question과 Rationale 섹션 제거
+                                fullNotes = fullNotes.replace(/=== Question.*?===[\s\S]*?(?=\n\n=== Rationale|$)/gi, '');
+                                fullNotes = fullNotes.replace(/=== Rationale.*?===[\s\S]*$/gi, '');
+                                fullNotes = fullNotes.trim();
+                                if (fullNotes && fullNotes.length > 10) {
+                                    reviewText += '=== Issues Found ===\n' + fullNotes + '\n\n';
+                                } else {
+                                    // 전체 review_notes를 사용
+                                    reviewText += '=== Issues Found ===\n' + data.review_notes + '\n\n';
+                                }
+                            }
+                        }
+                        
+                        if (data.revised_question) {
+                            reviewText += '=== Question (수정) ===\n' + data.revised_question + '\n\n';
+                        }
+                        if (data.revised_rationale) {
+                            reviewText += '=== Rationale (수정) ===\n' + data.revised_rationale;
+                        }
+                        
+                        // 최종 검증: 아무 내용도 없으면 전체 응답 표시
+                        if (reviewText.trim().length === 0) {
+                            if (data.review_notes) {
+                                reviewText = '=== 전체 검수 결과 ===\n' + data.review_notes;
+                            } else {
+                                reviewText = '=== 검수 결과 ===\n검수 결과를 받지 못했습니다. 서버 응답을 확인하세요.';
+                            }
+                        }
+                        
+                        reviewTextarea.value = reviewText.trim();
+                        reviewOKMessage.style.display = 'none';
+                        reviewContainer.style.display = 'block';
+                        updateStatus('검수 완료: 수정이 필요합니다. 검수 결과를 확인하세요.');
+                    } else {
+                        // 검수 통과 - 초록색 OK 표시
+                        reviewOKMessage.style.display = 'block';
+                        reviewTextarea.value = '';
+                        reviewContainer.style.display = 'block';
+                        updateStatus('검수 통과: OK');
+                    }
+                } else {
+                    alert('검수 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                button.textContent = originalText;
+                button.disabled = false;
+                console.error('Review error:', error);
+                alert('검수 중 오류가 발생했습니다: ' + error.message);
+            });
+        }
+        
+        function applyReviewResult() {
+            const reviewText = document.getElementById('reviewResult').value.trim();
+            if (!reviewText) {
+                alert('적용할 내용이 없습니다.');
+                return;
+            }
+            
+            // === Question (수정) === 와 === Rationale (수정) === 구분
+            const questionMatch = reviewText.match(/=== Question \(수정\) ===\s*([\s\S]*?)(?=\n\n=== Rationale|$)/);
+            const rationaleMatch = reviewText.match(/=== Rationale \(수정\) ===\s*([\s\S]*?)$/);
+            
+            if (questionMatch) {
+                const revisedQuestion = questionMatch[1].trim();
+                document.getElementById('question').value = revisedQuestion;
+            }
+            
+            if (rationaleMatch) {
+                const revisedRationale = rationaleMatch[1].trim();
+                document.getElementById('rationale').value = revisedRationale;
+            }
+            
+            closeReviewResult();
+            updateStatus('검수 결과가 적용되었습니다.');
+        }
+        
+        function closeReviewResult() {
+            document.getElementById('reviewResultContainer').style.display = 'none';
+            document.getElementById('reviewResult').value = '';
+            document.getElementById('reviewOKMessage').style.display = 'none';
+        }
+
+        // Handle keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // textarea나 input에 포커스가 있으면 단축키 무시
+            const activeElement = document.activeElement;
+            
+            // Ctrl+X: bbox toggle 체크/해제
+            if (e.ctrlKey && e.key.toLowerCase() === 'x' && !e.shiftKey && !e.altKey) {
+                const activeTag = activeElement.tagName.toLowerCase();
+                if (activeTag !== 'textarea' && activeTag !== 'input') {
+                    e.preventDefault();
+                    const bboxToggle = document.getElementById('bboxToggle');
+                    if (bboxToggle) {
+                        bboxToggle.checked = !bboxToggle.checked;
+                        toggleBboxes();
+                    }
+                    return;
+                }
+            }
+            
+            // Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4: 객관식 선지 선택
+            if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+                const activeTag = activeElement.tagName.toLowerCase();
+                if (activeTag !== 'textarea' && activeTag !== 'input') {
+                    let choiceId = null;
+                    if (e.key === '1') {
+                        e.preventDefault();
+                        choiceId = 'choiceCheckA';
+                    } else if (e.key === '2') {
+                        e.preventDefault();
+                        choiceId = 'choiceCheckB';
+                    } else if (e.key === '3') {
+                        e.preventDefault();
+                        choiceId = 'choiceCheckC';
+                    } else if (e.key === '4') {
+                        e.preventDefault();
+                        choiceId = 'choiceCheckD';
+                    }
+                    
+                    if (choiceId) {
+                        const choiceRadio = document.getElementById(choiceId);
+                        if (choiceRadio) {
+                            choiceRadio.checked = true;
+                            // change 이벤트 발생시키기 (필요한 경우)
+                            choiceRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        return;
+                    }
+                }
+            }
+            const isInputFocused = activeElement && (
+                activeElement.tagName === 'TEXTAREA' ||
+                activeElement.tagName === 'INPUT' ||
+                activeElement.isContentEditable
+            );
+            
+            if (isInputFocused) {
+                return; // textarea/input에 포커스가 있으면 단축키 무시
+            }
+            
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 's') {
+                    e.preventDefault();
+                    saveAnnotation();
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    previousImage();
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    nextImage();
+                }
+            }
+        });
+
+        // === Enter/Space 로 포커스 bbox 선택/해제 ===
+        document.addEventListener('keydown', (e) => {
+            // 입력창/텍스트영역에서 타이핑 중이면 방해하지 않음
+            const tag = (e.target && e.target.tagName || '').toLowerCase();
+            const isTyping = tag === 'input' || tag === 'textarea';
+            if (isTyping) return;
+
+            if ((e.key === 'Enter' || e.code === 'Space') && focusedBboxIndex !== null && currentImageData) {
+                e.preventDefault();
+                const targetBBox = currentImageData.bboxes[focusedBboxIndex];
+                const el = bboxElements[focusedBboxIndex];
+                selectBbox(targetBBox, el);
+            }
+        });
+
+        
+        // Load last worked image or first image on start
+        function loadLastImage() {
+            try {
+                const lastIndex = localStorage.getItem('lastImageIndex');
+                if (lastIndex !== null && lastIndex !== '' && lastIndex !== 'undefined') {
+                    const index = parseInt(lastIndex, 10);
+                    if (!isNaN(index) && index >= 0 && typeof loadImage === 'function') {
+                        loadImage(index);
+                        return;
+                    }
+                }
+                // 기본값: 첫 번째 이미지
+                if (typeof loadImage === 'function') {
+                    loadImage(0);
+                }
+            } catch (e) {
+                console.error('loadLastImage error:', e);
+                if (typeof loadImage === 'function') {
+                    loadImage(0);
+                }
+            }
+        }
+        
+        // 페이지 로드 시 마지막 작업 이미지로 이동
+        // loadImage 함수 내부에서 처리하므로 여기서는 첫 이미지만 로드
+        // DOM이 준비되면 첫 이미지 로드 (loadImage 함수 내부에서 localStorage 확인)
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                loadImage(0);
+            });
+        } else {
+            loadImage(0);
+        }
+    </script>
+</body>
+</html>
