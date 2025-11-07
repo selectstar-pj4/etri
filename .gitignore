@@ -27,9 +27,9 @@ mscoco/ego_images/
 # API Keys (보안)
 config.py
 
-# Large JSON files (필요시 주석 해제)
-# mscoco/instances_train2017.json
-# mscoco/filtered_annotations.json
+# Large JSON files (Git에 포함하지 않음 - 로컬에서만 사용)
+mscoco/instances_train2017.json
+mscoco/filtered_annotations.json
 
 # Output files (개인 작업 파일 - 필요시 주석 해제)
 # mscoco/web_annotations_exo.json
