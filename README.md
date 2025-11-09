@@ -95,6 +95,17 @@ etri_annotation_tool/
     └── index.html             # 웹 인터페이스 템플릿
 ```
 
+### ⚠️ 중요: 로컬에 필요한 파일 구성
+
+다음 파일들은 용량이 크거나 Git에 포함되지 않으므로, **로컬 환경에서 직접 구성해야 합니다**:
+
+- `mscoco/instances_train2017.json` - COCO 어노테이션 파일 (약 448MB)
+- `mscoco/filtered_annotations.json` - 필터링된 어노테이션 파일 (약 54MB)
+- `mscoco/exo_images/` - Exo 이미지 폴더
+- `mscoco/ego_images/` - Ego 이미지 폴더
+
+이 파일들은 `.gitignore`에 포함되어 있어 Git 저장소에는 업로드되지 않습니다. 프로젝트를 사용하려면 해당 경로에 위 파일들을 직접 구성해야 합니다.
+
 ## ✨ 주요 기능
 
 ### 1. 이중 패널 인터페이스
