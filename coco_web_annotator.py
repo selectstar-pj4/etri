@@ -770,80 +770,10 @@ Translate the Korean question and choices to English following the EXACT format 
         # 문장 끝의 "]" 제거 (choice 태그 앞)
         cleaned_question = re.sub(r'\]+\s*(?=<choice>)', ' ', cleaned_question, flags=re.IGNORECASE)
         
-        # 한글 근거 자동 생성 (1차 가공)
-        rationale_ko_generated = ""
-        if question_ko and choice_texts:
-            # 선택된 답안 찾기 (request에서 selected_choice 또는 response에서)
-            selected_choice = data.get('selected_choice', None)
-            if not selected_choice:
-                response_data = data.get('response', '')
-                if response_data:
-                    response_match = re.search(r'\(([a-d])\)', response_data, re.IGNORECASE)
-                    if response_match:
-                        selected_choice = response_match.group(1).lower()
-            
-            # 선택된 답안의 한글 텍스트 찾기
-            selected_choice_ko = ""
-            if selected_choice:
-                choice_map = {
-                    'a': choice_a,
-                    'b': choice_b,
-                    'c': choice_c,
-                    'd': choice_d
-                }
-                selected_choice_ko = choice_map.get(selected_choice.lower(), '')
-            
-            # 한글 근거 생성 프롬프트
-            rationale_prompt = f"""다음 한글 질문과 선택지를 바탕으로 소거법 형식의 한글 근거를 작성해주세요.
-
-질문: {question_ko}
-
-선택지:
-(a) {choice_a}
-(b) {choice_b}
-(c) {choice_c}
-(d) {choice_d}
-
-정답: {f"({selected_choice}) {selected_choice_ko}" if selected_choice and selected_choice_ko else "미정"}
-
-요구사항:
-1. 소거법 형식이지만 하나의 문단 형태로 작성 (각 선택지를 개별 문장으로 나누지 말고 하나의 흐름으로 연결)
-2. 선택지 설명 순서: a, b, c, d 순서가 아니라 질문 조건에 부합하지 않는 정도에 따라 정렬
-   - 모든 조건이 부합되지 않는 선택지부터 설명
-   - 한 가지 조건만 부합되지 않는 선택지
-   - 마지막에 정답과 유사한 선택지를 비교하여 정답 설명
-3. 예시 형식: "[선택지 텍스트]는 모든 조건이 부합되지 않으므로 제외되고, [선택지 텍스트]는 한 가지 조건이 부합되지 않으므로 제외되고, [선택지 텍스트]와 [선택지 텍스트] 중 [선택지 텍스트]가 질문에 부합되기 때문에 그러므로 [선택지 텍스트]가 정답이다."
-4. "a", "b", "c", "d"라는 문자 표현을 사용하지 말고, 선택지의 실제 텍스트(예: "포크", "접시", "컵" 등)를 직접 사용
-5. 각 객관식 선지에 대한 설명을 개별 문장으로 나누지 말고, 하나의 연결된 문단으로 작성
-6. 한글로 자연스럽게 작성
-7. 간결하고 명확하게 작성
-8. 질문의 맥락과 이미지의 공간 관계를 고려하여 작성
-9. 문단 끝에 "그러므로 [선택지 텍스트]가 정답이다." 또는 "따라서 [선택지 텍스트]가 정답이다."로 마무리 (선택지 텍스트 사용, a/b/c/d 사용 금지)
-
-한글 근거를 작성해주세요 (하나의 문단 형태로, 조건 부합 정도 순서로, 선택지 텍스트 직접 사용):"""
-            
-            try:
-                rationale_response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that generates Korean rationales for VQA questions using elimination method format. Write in natural Korean as a single connected paragraph. Order choices by how many conditions they fail (most failed conditions first, then fewer, then compare correct answer with similar choices). NEVER use letters 'a', 'b', 'c', 'd' - always use the actual choice text (e.g., '포크', '접시', '컵'). End with '그러므로 [choice text]가 정답이다.' or '따라서 [choice text]가 정답이다.'"},
-                        {"role": "user", "content": rationale_prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=300
-                )
-                rationale_ko_generated = rationale_response.choices[0].message.content.strip()
-            except Exception as e:
-                print(f"[ERROR] Failed to generate Korean rationale: {type(e).__name__}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                rationale_ko_generated = ""
-        
         return jsonify({
             'success': True,
             'translated_question': cleaned_question,
-            'choice_texts': choice_texts,
-            'rationale_ko_generated': rationale_ko_generated
+            'choice_texts': choice_texts
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -916,10 +846,19 @@ The rationale must follow an elimination method format:
 2. Explain why each incorrect choice (a, b, c, d) is excluded, EXCEPT for the correct answer ({correct_answer})
 3. For each incorrect choice, state why it doesn't match the question criteria
 4. Finally, explain why the correct answer ({correct_answer}: {choices.get(correct_answer, '')}) is the right choice
-5. End with "Therefore [correct answer] is [the answer/description]."
+5. End with "Therefore [correct answer] is [the answer/description]." - DO NOT add any additional explanation after "Therefore" sentence
+6. CRITICAL: After "Therefore" statement, do NOT add phrases like "as it is...", "because it is...", "since it is...", or any additional descriptive clauses
 
 Example format:
 "The question is {question_type}: [Choice a] is excluded because [reason]. [Choice b] is excluded because [reason]. [Choice c] is excluded because [reason]. Therefore [correct answer] is [the answer/description]."
+
+WRONG examples (DO NOT include):
+- "Therefore the sandwich is correct, as it is the closest edible object to the wine glass on the table in the restaurant."
+- "Therefore the vase is correct because it is the farthest object from the boy."
+
+CORRECT examples:
+- "Therefore the sandwich is correct."
+- "Therefore the vase is the farthest object from the boy, making the vase correct."
 
 Current question: {question}
 Correct answer: {response}
@@ -935,6 +874,7 @@ REQUIREMENTS:
 5. Use the image analysis context to create accurate descriptions of spatial relationships and object positions
 6. DO NOT include any bounding box coordinates (x1, y1, x2, y2) or coordinate information in the rationale
 7. When the Korean rationale mentions choice letters (a, b, c, d), translate them to the corresponding English choice text from the question
+8. CRITICAL: End the rationale with a simple "Therefore" statement. DO NOT add additional explanatory clauses after "Therefore" such as "as it is...", "because it is...", "since it is...", or any descriptive phrases that repeat information already stated
 
 Korean rationale: {rationale_ko}
 
@@ -971,7 +911,7 @@ For example, if the Korean rationale says "(d) 포크" or just "d" or "포크", 
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": f"You are a professional translator specializing in VQA (Visual Question Answering) rationales. Always start with 'The question is {question_type}:' and use elimination method format with at least 2 sentences. Never include bounding box coordinates. When Korean rationale mentions choice letters (a, b, c, d) or Korean choice text, translate them to the corresponding English choice text."},
+                    {"role": "system", "content": f"You are a professional translator specializing in VQA (Visual Question Answering) rationales. Always start with 'The question is {question_type}:' and use elimination method format with at least 2 sentences. Never include bounding box coordinates. When Korean rationale mentions choice letters (a, b, c, d) or Korean choice text, translate them to the corresponding English choice text. CRITICAL: End with a simple 'Therefore' statement - do NOT add additional explanatory clauses like 'as it is...', 'because it is...', or 'since it is...' after the 'Therefore' sentence."},
                     {"role": "user", "content": enhanced_prompt}
                 ],
                 temperature=0.3,
@@ -999,6 +939,30 @@ For example, if the Korean rationale says "(d) 포크" or just "d" or "포크", 
         translated_rationale = re.sub(r'bbox[^.]*\.?', '', translated_rationale, flags=re.IGNORECASE)
         translated_rationale = re.sub(r'coordinate[^.]*\.?', '', translated_rationale, flags=re.IGNORECASE)
         translated_rationale = re.sub(r'\(x\d+.*?y\d+.*?\)', '', translated_rationale, flags=re.IGNORECASE)
+        
+        # "Therefore" 문장 뒤의 추가 설명 제거 (as it is, because it is, since it is 등)
+        # "Therefore" 문장 뒤에 ", as it is", ", because it is", ", since it is" 같은 패턴이 있으면 제거
+        translated_rationale = re.sub(r'(Therefore[^,.]*?)(,\s*(as|because|since)\s+it\s+is[^.]*?\.)', r'\1.', translated_rationale, flags=re.IGNORECASE)
+        # "Therefore" 문장 뒤에 추가 문장이 있고, 그것이 "as it is", "because it is", "since it is"로 시작하면 제거
+        translated_rationale = re.sub(r'(Therefore[^.]*\.)\s+((As|Because|Since)\s+it\s+is[^.]*?\.)', r'\1', translated_rationale, flags=re.IGNORECASE)
+        # "Therefore" 문장 뒤에 ", as" 또는 ", because" 또는 ", since"로 시작하는 추가 설명이 있으면 제거
+        translated_rationale = re.sub(r'(Therefore[^,.]*?)(,\s+(as|because|since)\s+[^.]*?\.)', r'\1.', translated_rationale, flags=re.IGNORECASE)
+        # "Therefore" 문장을 찾아서 그 문장의 마침표까지만 남기고, 그 뒤의 모든 추가 설명 제거 (더 안전한 방법)
+        # "Therefore" 문장 뒤에 나오는 ", as it is..." 같은 모든 추가 설명 제거
+        therefore_match = re.search(r'(Therefore[^.]*?\.)', translated_rationale, re.IGNORECASE)
+        if therefore_match:
+            therefore_end = therefore_match.end()
+            # "Therefore" 문장 뒤에 ", as", ", because", ", since" 같은 패턴이 있으면 제거
+            remaining = translated_rationale[therefore_end:].strip()
+            if remaining:
+                # ", as it is", ", because it is", ", since it is" 같은 패턴 제거
+                remaining = re.sub(r'^,\s*(as|because|since)\s+it\s+is[^.]*?\.', '', remaining, flags=re.IGNORECASE)
+                # "As it is", "Because it is", "Since it is" 같은 패턴으로 시작하는 문장 제거
+                remaining = re.sub(r'^(As|Because|Since)\s+it\s+is[^.]*?\.', '', remaining, flags=re.IGNORECASE)
+                # ", as", ", because", ", since" 같은 패턴 제거
+                remaining = re.sub(r'^,\s+(as|because|since)\s+[^.]*?\.', '', remaining, flags=re.IGNORECASE)
+                translated_rationale = translated_rationale[:therefore_end] + (' ' + remaining if remaining else '')
+        
         translated_rationale = re.sub(r'\s+', ' ', translated_rationale).strip()
         
         # 문장 수 확인 (최소 2문장)
@@ -1029,6 +993,20 @@ Expand it to at least 2 sentences, keeping the same format and style."""
             translated_rationale = re.sub(r'bbox[^.]*\.?', '', translated_rationale, flags=re.IGNORECASE)
             translated_rationale = re.sub(r'coordinate[^.]*\.?', '', translated_rationale, flags=re.IGNORECASE)
             translated_rationale = re.sub(r'\(x\d+.*?y\d+.*?\)', '', translated_rationale, flags=re.IGNORECASE)
+            # "Therefore" 문장 뒤의 추가 설명 제거
+            translated_rationale = re.sub(r'(Therefore[^,.]*?)(,\s*(as|because|since)\s+it\s+is[^.]*?\.)', r'\1.', translated_rationale, flags=re.IGNORECASE)
+            translated_rationale = re.sub(r'(Therefore[^.]*\.)\s+((As|Because|Since)\s+it\s+is[^.]*?\.)', r'\1', translated_rationale, flags=re.IGNORECASE)
+            translated_rationale = re.sub(r'(Therefore[^,.]*?)(,\s+(as|because|since)\s+[^.]*?\.)', r'\1.', translated_rationale, flags=re.IGNORECASE)
+            # "Therefore" 문장을 찾아서 그 문장의 마침표까지만 남기고, 그 뒤의 모든 추가 설명 제거
+            therefore_match = re.search(r'(Therefore[^.]*?\.)', translated_rationale, re.IGNORECASE)
+            if therefore_match:
+                therefore_end = therefore_match.end()
+                remaining = translated_rationale[therefore_end:].strip()
+                if remaining:
+                    remaining = re.sub(r'^,\s*(as|because|since)\s+it\s+is[^.]*?\.', '', remaining, flags=re.IGNORECASE)
+                    remaining = re.sub(r'^(As|Because|Since)\s+it\s+is[^.]*?\.', '', remaining, flags=re.IGNORECASE)
+                    remaining = re.sub(r'^,\s+(as|because|since)\s+[^.]*?\.', '', remaining, flags=re.IGNORECASE)
+                    translated_rationale = translated_rationale[:therefore_end] + (' ' + remaining if remaining else '')
             translated_rationale = re.sub(r'\s+', ' ', translated_rationale).strip()
         
         return jsonify({
