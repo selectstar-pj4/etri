@@ -347,20 +347,45 @@ def translate_question():
         client = OpenAI(api_key=OPENAI_API_KEY)
         
         # exo_data_sample.json 형식 참고하여 프롬프트 작성
-        prompt = f"""Translate the following Korean question to English. The translation must:
-1. Be natural and grammatically correct
-2. Include <ATT>, <POS>, <REL> tags if they exist in the Korean text or are implied
-3. End with "And provide the bounding box coordinate of the region related to your answer."
-4. Include a <choice> tag with 4 options in the format: <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice>
+        prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format:
+
+CORRECT FORMAT:
+[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+
+CRITICAL TAG USAGE RULES:
+
+1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
+   - Examples: "farthest", "closest", "second-closest", "placed on the floor"
+   - DO NOT use for objects or locations
+
+2. <POS> tag - Use ONLY for POSITION/LOCATION information:
+   - Examples: "in the center", "on the left side of", "in front of", "to the left side", "on the right side"
+   - DO NOT use for object attributes or relationships
+   - DO NOT use generic phrases like "in the image"
+
+3. <ATT> tag - Use ONLY for ATTRIBUTES or TARGET GROUPS:
+   - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item"
+   - Use for describing WHAT object/group is being asked about
+
+Reference examples:
+- "Which <ATT>red object</ATT> is <REL>farthest</REL> from the flag <POS>in the center of the table</POS>?"
+- "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the man?"
+- "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table?"
 
 Korean question: {question_ko}
 
-Translate to English following the format from exo_data_sample.json examples."""
+Translate to English following the EXACT format above. Make sure:
+- <REL> is used ONLY for relationship terms (farthest, closest, etc.)
+- <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
+- <ATT> is used ONLY for attributes or target groups (red object, among the items, etc.)
+- All tags have meaningful content inside them
+- <choice> tag comes before "And provide..." phrase
+- DO NOT use generic phrases like "in the image" for <POS> tag"""
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. Always include <ATT>, <POS>, <REL> tags and <choice> tags in the correct format."},
+                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide..., 6) DO NOT use generic phrases like 'in the image' for <POS> tag."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
@@ -631,19 +656,44 @@ Use this image analysis to better understand the context and spatial relationshi
 CORRECT FORMAT:
 [Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
 
-CRITICAL REQUIREMENTS:
-1. <ATT>, <POS>, <REL> tags MUST contain actual meaningful content inside them (NOT empty like <ATT></ATT>)
-2. Tags should be embedded naturally within the question sentence, not at the end
-3. The <choice> tag MUST come BEFORE "And provide..." phrase
-4. The order is: [Question with tags] <choice>...</choice> And provide...
+CRITICAL TAG USAGE RULES:
 
-Examples of CORRECT tag usage:
-- <ATT>square-shaped item</ATT>
-- <POS>in the center</POS>
-- <REL>farthest</REL>
-- <ATT>among the visible people</ATT>
-- <POS>on the left side of</POS>
-- <REL>closest</REL>
+1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
+   - Examples: "farthest", "closest", "second-closest", "placed on the floor"
+   - DO NOT use for objects or locations
+   - CORRECT: "Which object is <REL>farthest</REL> from..."
+   - WRONG: "<REL>flag in the center</REL>" (this should be <POS>)
+
+2. <POS> tag - Use ONLY for POSITION/LOCATION information:
+   - Examples: "in the center", "on the left side of", "in front of", "to the left side", "on the right side", "around the dining table"
+   - DO NOT use for object attributes or relationships
+   - CORRECT: "...flag <POS>in the center of the table</POS>"
+   - WRONG: "<POS>in the image</POS>" (too generic, not meaningful)
+   - WRONG: "<ATT>flag in the center of the table</ATT>" (location info should be <POS>)
+
+3. <ATT> tag - Use ONLY for ATTRIBUTES or TARGET GROUPS:
+   - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item", "object that can hold water", "non-edible item"
+   - Use for describing WHAT object/group is being asked about
+   - CORRECT: "Which <ATT>red object</ATT> is..."
+   - CORRECT: "<ATT>Among the items</ATT> on the table..."
+   - WRONG: "<ATT>flag in the center of the table</ATT>" (contains location, should split: flag <POS>in the center of the table</POS>)
+
+4. GENERAL RULES:
+   - Tags MUST contain actual meaningful content (NOT empty like <ATT></ATT>)
+   - Tags should be embedded naturally within the question sentence, not at the end
+   - The <choice> tag MUST come BEFORE "And provide..." phrase
+   - DO NOT use generic phrases like "in the image" for <POS> tag
+   - If a phrase contains both attribute and location, split them appropriately
+
+Reference examples from exo_data_sample.json:
+
+Example 1: "<REL>Second-closest</REL> to the refrigerator a countertop located <POS>in the center</POS> of the image, which object is it <ATT>among the items</ATT>? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 2: "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 3: "Which <ATT>round and cylindrical object</ATT> is <REL>farthest</REL> from the person sitting <POS>on the right side of</POS> the dining table? <choice>(a) plate, (b) white cake, (c) rightmost coke, (d) vase</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 4: "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table? <choice>(a) glass, (b) potato fries, (c) hamburger, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
 
 Korean question: {question_ko}
 
@@ -653,18 +703,19 @@ Korean choices:
 (c) {choice_c}
 (d) {choice_d}
 
-Reference example (exo_data_sample.json format):
-"<REL>Second-closest</REL> to the refrigerator a countertop located <POS>in the center</POS> of the image, which object is it <ATT>among the items</ATT>? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
-
-Translate the Korean question and choices to English following this EXACT format. Make sure:
-- All <ATT>, <POS>, <REL> tags have meaningful content inside them
+Translate the Korean question and choices to English following the EXACT format above. Make sure:
+- <REL> is used ONLY for relationship terms (farthest, closest, etc.)
+- <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
+- <ATT> is used ONLY for attributes or target groups (red object, among the items, etc.)
+- All tags have meaningful content inside them
 - Tags are naturally embedded in the question sentence
-- <choice> tag comes before "And provide..." phrase"""
+- <choice> tag comes before "And provide..." phrase
+- DO NOT use generic phrases like "in the image" for <POS> tag"""
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL: <ATT>, <POS>, <REL> tags MUST contain actual content (not empty). The format MUST be: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase)."},
+                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 6) DO NOT use generic phrases like 'in the image' for <POS> tag."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3

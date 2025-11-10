@@ -1,0 +1,28 @@
+[
+  {
+    "image_id": 336489,
+    "image_path": "/000000336489.jpg",
+    "image_resolution": "600x464",
+    "question": "Which <ATT>people object</ATT> is <REL>farthest</REL> from the thermos on the table <POS>on the left side of</POS> the image? <choice>(a) bicycle man, (b) fishing man, (c) sunbed woman , (d) tree</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) bicycle man",
+    "rationale": "The question is exo-centric: The tree is excluded because it is not a person, despite being the farthest from the thermos on the table. The fishing man is excluded because he is actually the closest to the thermos, positioned next to the sunbed woman. Therefore, the bicycle man is the correct answer as he is indeed the farthest from the thermos on the table, located to the right side of the image. Thus, the bicycle man is the answer.",
+    "view": "exo",
+    "bbox": [491.89,
+      293.5,
+      60.27,
+      113.65]
+  },
+  {
+    "image_id": 342996,
+    "image_path": "/000000342996.jpg",
+    "image_resolution": "640x405",
+    "question": "Which <ATT>red object</ATT> is <REL>farthest</REL> from the flag <POS>in the center of the table</POS>? <choice>(a) tie, (b) South Korean flag, (c) book, (d) cup</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) tie",
+    "rationale": "The question is exo-centric: The book is excluded because it is not a red object, even though it is the farthest from the flag. The South Korean flag is excluded because, while it is a red object, it is positioned closest to the center of the table. The cup is also excluded because the tie is farther away than the cup. Therefore, the correct answer is tie.",
+    "view": "exo",
+    "bbox": [486,
+      114.86,
+      64.49,
+      168.34]
+  }
+]
