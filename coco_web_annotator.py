@@ -432,8 +432,21 @@ def translate_choices():
         
         client = OpenAI(api_key=api_key)
         
-        prompt = f"""Translate the following Korean multiple choice options to English. Keep them concise and natural.
+        prompt = f"""Translate the following Korean multiple choice options to English. Use concise, intuitive adjective+noun or noun+noun format (NOT full sentences).
 
+CRITICAL FORMATTING RULES:
+- Use concise, intuitive format: adjective + noun or noun + noun
+- Examples:
+  * "a person in a black shirt" → "black shirt person"
+  * "a person wearing glasses" → "glasses person"
+  * "a cup on the table" → "table cup" or "cup"
+  * "a red chair" → "red chair"
+  * "a man with a blue t-shirt" → "blue t-shirt man"
+- DO NOT use full sentences like "a person who is wearing a black shirt"
+- DO NOT use articles "a" or "the" unless necessary
+- Keep it short and intuitive
+
+Korean choices:
 (a) {choice_a}
 (b) {choice_b}
 (c) {choice_c}
@@ -446,7 +459,7 @@ Return only the formatted <choice> tag with translations."""
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a translator. Translate Korean choices to natural English and format them correctly."},
+                {"role": "system", "content": "You are a translator specializing in concise, intuitive translations for multiple choice options. CRITICAL: Use adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences. Keep translations short and intuitive."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
@@ -609,6 +622,416 @@ Provide a comprehensive but concise description that captures these detailed vis
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/generate_question_and_choices', methods=['POST'])
+def generate_question_and_choices():
+    """Generate Korean question and choices using GPT-4o, after image analysis with GPT-4o-mini."""
+    data = request.json
+    image_id = data.get('image_id', None)
+    index = data.get('index', None)
+    
+    if image_id is None and index is None:
+        return jsonify({'success': False, 'error': 'image_id or index is required'}), 400
+    
+    try:
+        if not OPENAI_AVAILABLE:
+            return jsonify({'success': False, 'error': 'OpenAI library not installed. Install with: pip install openai'}), 500
+        
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-api-key-here":
+            return jsonify({'success': False, 'error': 'OPENAI_API_KEY is not set. Please set it in coco_web_annotator.py'}), 500
+        
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # image_id가 없으면 index로 찾기
+        if image_id is None:
+            if index >= len(annotator.image_ids):
+                return jsonify({'error': 'Invalid index'}), 400
+            image_id = annotator.image_ids[index]
+        
+        # 1단계: 이미지 분석 (GPT-4o-mini) - 캐시 확인 또는 실행
+        image_analysis = ""
+        if image_id in image_analysis_cache:
+            image_analysis = image_analysis_cache[image_id]
+        else:
+            # 이미지 분석 API 호출 (캐시에 없으면 실행)
+            # index 찾기
+            if index is None:
+                for idx, img_id in enumerate(annotator.image_ids):
+                    if img_id == image_id:
+                        index = idx
+                        break
+                if index is None:
+                    return jsonify({'success': False, 'error': 'Image not found'}), 404
+            
+            # analyze_image 함수 로직 재사용
+            image_info = annotator.coco.imgs[image_id]
+            existing_annotation = None
+            for ann in annotator.annotations:
+                if ann['image_id'] == image_id:
+                    existing_annotation = ann
+                    break
+            
+            view_type = 'exo'
+            if existing_annotation:
+                view_type = existing_annotation.get('view', 'exo')
+            
+            if view_type == 'ego':
+                image_path = os.path.join(annotator.ego_images_folder, image_info['file_name'])
+            else:
+                image_path = os.path.join(annotator.exo_images_folder, image_info['file_name'])
+            
+            if not os.path.exists(image_path):
+                alt_path_exo = os.path.join(annotator.exo_images_folder, image_info['file_name'])
+                alt_path_ego = os.path.join(annotator.ego_images_folder, image_info['file_name'])
+                if os.path.exists(alt_path_exo):
+                    image_path = alt_path_exo
+                elif os.path.exists(alt_path_ego):
+                    image_path = alt_path_ego
+                else:
+                    return jsonify({'success': False, 'error': f'Image not found: {image_info["file_name"]}'}), 404
+            
+            # 이미지 분석 실행 (GPT-4o-mini)
+            with Image.open(image_path) as img:
+                original_width, original_height = img.size
+                max_size = 1024
+                if original_width > max_size or original_height > max_size:
+                    scale = min(max_size/original_width, max_size/original_height)
+                    new_width = int(original_width * scale)
+                    new_height = int(original_height * scale)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                buffer = BytesIO()
+                img.save(buffer, format='JPEG', quality=85)
+                img_base64 = base64.b64encode(buffer.getvalue()).decode()
+            
+            analysis_prompt = """Analyze this image in detail and extract specific visual features. Focus on:
+
+1. **Objects with detailed attributes**: 
+   - Color (e.g., "yellow cup", "red chair", "blue bag")
+   - Size/shape (e.g., "large square table", "small round plate")
+   - Material/texture (e.g., "wooden shelf", "glass window", "metal door")
+
+2. **Spatial relationships and positions**:
+   - Location (e.g., "book on the shelf", "cup on the table", "person in the corner")
+   - Relative positions (e.g., "left side of the image", "center of the room", "right edge")
+   - Orientation (e.g., "person facing right", "door opening left", "chair tilted")
+
+3. **Detailed object descriptions**:
+   - Specific features (e.g., "person wearing glasses", "book with red cover", "chair with armrests")
+   - States/conditions (e.g., "open door", "closed window", "empty cup")
+   - Interactions (e.g., "person holding cup", "book placed on shelf")
+
+4. **Spatial context**:
+   - Room/space type (e.g., "kitchen", "living room", "office")
+   - Layout information (e.g., "countertop in center", "refrigerator on left side")
+   - Distance relationships (e.g., "closest to camera", "farthest from door")
+
+Provide a comprehensive but concise description that captures these detailed visual features. Format the output as structured text that can be used to understand spatial relationships and object attributes for VQA (Visual Question Answering) tasks."""
+            
+            analysis_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": analysis_prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{img_base64}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=1000
+            )
+            
+            image_analysis = analysis_response.choices[0].message.content.strip()
+            image_analysis_cache[image_id] = image_analysis
+        
+        # 2단계: COCO 어노테이션 정보 가져오기
+        ann_ids = annotator.coco.getAnnIds(imgIds=image_id)
+        annotations = annotator.coco.loadAnns(ann_ids)
+        
+        # 카테고리 정보 구성
+        category_info = []
+        for ann in annotations:
+            cid = ann.get('category_id', None)
+            name = annotator.category_id_to_name.get(int(cid), 'unknown') if cid is not None else 'unknown'
+            bbox = ann.get('bbox', [])
+            category_info.append({
+                'category_name': name,
+                'bbox': bbox
+            })
+        
+        # 주요 객체 목록 생성
+        main_objects = list(set([cat['category_name'] for cat in category_info if cat['category_name'] != 'unknown']))[:10]
+        
+        # 3단계: 질문 생성 (GPT-4o)
+        # 3-hop 질문 생성: ATT, POS, REL이 모두 포함된 복잡한 질문
+        question_generation_prompt = f"""이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 3-hop 질문을 한글로 생성해주세요.
+
+이미지 분석 결과:
+{image_analysis}
+
+COCO 객체 정보 (bbox로 식별 가능한 객체들):
+- 주요 객체: {', '.join(main_objects) if main_objects else '없음'}
+- 총 객체 수: {len(category_info)}
+- 각 객체는 이미지 내 bbox로 정확히 식별 가능함
+
+**중요**: 이미지 분석 결과에서 언급된 객체들 중에서, COCO 어노테이션에 존재하는 객체만 선택지로 사용하세요. 같은 종류의 객체가 여러 개 있으면 색상, 위치, 속성 등으로 명확히 구분하세요.
+
+CRITICAL REQUIREMENTS - 3-HOP QUESTIONS:
+
+1. **반드시 3-hop 질문 생성**: 각 질문은 ATT(속성), POS(위치), REL(관계) 세 가지 요소를 모두 포함해야 합니다.
+
+2. **ATT (속성/대상) 예시 - CRITICAL: 객관적이고 구체적인 표현만 사용**:
+   - ❌ 절대 사용 금지 - 추상적이고 주관적인 표현:
+     * "작은 컵", "중간 크기의 테이블", "큰 소파" (크기는 주관적)
+     * "예쁜 꽃병", "멋진 의자", "좋은 책" (미적 판단은 주관적)
+     * "보통 크기", "적당한 크기", "작은 크기" (모호함)
+   
+   - ✅ 반드시 사용 - 객관적이고 구체적인 속성:
+     * 색상: "빨간색 물체", "파란색 컵", "흰색 의자", "검은색 테이블"
+     * 모양: "정사각형 또는 직사각형 객체", "원형 또는 원통형 물체", "둥근 접시"
+     * 재질: "나무 테이블", "유리 컵", "금속 포크", "플라스틱 그릇"
+     * 기능/용도: "식용 가능한 물체", "식탁용품", "주방용품", "의자", "책"
+     * 위치 구분: "왼쪽 컵", "오른쪽 의자", "중앙 테이블" (구체적 위치 기준)
+     * 패턴/디자인: "줄무늬 셔츠", "체크 무늬 타올", "단색 의자"
+   
+   - **중요**: 크기, 미적 판단 등 주관적인 표현을 절대 사용하지 말고, 색상, 모양, 재질, 기능, 위치 등 객관적으로 확인 가능한 속성만 사용하세요.
+
+3. **POS (위치) 예시 - CRITICAL: 구체적인 객체 기준으로 위치 설명 + 위치 반전 규칙**:
+   - ❌ 잘못된 예시: "이미지 중앙에", "이미지 왼쪽에" (모호함 - 중앙의 기준이 불명확)
+   - ✅ 올바른 예시: "테이블 중앙에", "소파 왼쪽에", "싱크대 오른쪽에"
+   - ✅ 올바른 예시: "카운터 중앙에", "창문 근처에", "냉장고 왼쪽에"
+   - ✅ 올바른 예시: "테이블 오른쪽 사이드에", "소파 왼쪽 사이드에", "식탁 중앙에"
+   - **중요**: "이미지 중앙", "이미지 왼쪽" 같은 모호한 표현을 사용하지 말고, 반드시 구체적인 객체(테이블, 소파, 싱크대, 카운터 등)를 기준으로 위치를 설명하세요.
+   - **CRITICAL - 위치 반전 규칙**: 질문 생성 시 위치 표현을 반대로 변환하세요:
+     * 실제로 "왼쪽"에 있는 경우 → 질문에서는 "오른쪽"으로 표현
+     * 실제로 "오른쪽"에 있는 경우 → 질문에서는 "왼쪽"으로 표현
+     * 예시: 실제로 "소파 왼쪽에" 있는 경우 → 질문에서는 "소파 오른쪽에"로 표현
+     * 예시: 실제로 "테이블 오른쪽에" 있는 경우 → 질문에서는 "테이블 왼쪽에"로 표현
+
+4. **REL (관계) 예시**:
+   - "가장 가까운", "가장 먼", "두 번째로 가까운"
+   - "가장 높은", "가장 낮은", "가장 위에 있는"
+
+5. **3-hop 질문 구조 예시** (exo_data_sample.json, web_annotations_exo.json 참고):
+   - "테이블 중앙에 있는 빨간색 bowl 왼쪽 사이드에 위치한 정사각형 또는 직사각형 객체에서 창문으로부터 가장 가까운 객체는?"
+     → POS: 테이블 중앙에 있는 빨간색 bowl 왼쪽 사이드에, ATT: 정사각형 또는 직사각형 객체, REL: 가장 가까운
+     → ❌ "이미지 중앙에" (모호함) 대신 ✅ "테이블 중앙에" (구체적)
+     → **위치 반전**: 실제로 "오른쪽"에 있으면 질문에서는 "왼쪽"으로 표현
+   
+   - "테이블 위에서 와인잔으로부터 가장 먼 식용 가능한 물체는 무엇인가?"
+     → POS: 테이블 위에서, ATT: 식용 가능한 물체, REL: 가장 먼
+   
+   - "소파 오른쪽에 있는 사람 중에서 텔레비전으로부터 가장 먼 사람은 누구인가?"
+     → POS: 소파 오른쪽에, ATT: 사람, REL: 가장 먼
+     → **위치 반전**: 실제로 "왼쪽"에 있으면 질문에서는 "오른쪽"으로 표현
+   
+   - "싱크대 왼쪽 사이드에 위치한 흰색 색상의 객체에서 가장 멀리 떨어져 있는 것은?"
+     → POS: 싱크대 왼쪽 사이드에, ATT: 흰색 색상의 객체, REL: 가장 멀리 떨어져 있는
+     → ❌ "이미지 중앙에 있는 싱크대" (모호함) 대신 ✅ "싱크대" (구체적)
+     → **위치 반전**: 실제로 "오른쪽"에 있으면 질문에서는 "왼쪽"으로 표현
+
+6. **CRITICAL - 질문 유형 제한 (생뚱맞는 질문 금지)**:
+   - ❌ 절대 사용 금지 - 색상이나 종류를 묻는 질문:
+     * "어떤 색상인가요?", "무슨 색인가요?", "색깔은 무엇인가요?"
+     * "어떤 잡지인가요?", "무슨 종류인가요?", "어떤 타입인가요?"
+     * "어떤 모양인가요?", "무슨 형태인가요?"
+     * 이런 질문들은 VQA 태스크에 적합하지 않으며 절대 생성하지 마세요.
+   
+   - ✅ 반드시 사용 - 구체적인 객체를 묻는 질문:
+     * "어떤 객체는?", "무엇은?", "어떤 물체는?"
+     * "어떤 컵은?", "어떤 의자는?", "어떤 사람은?"
+     * 질문의 답은 반드시 구체적인 객체(컵, 의자, 사람, 테이블 등)여야 합니다.
+   
+   - **중요**: 질문은 반드시 이미지 내에 존재하는 구체적인 객체를 묻는 형태여야 하며, 색상, 종류, 모양 등 추상적인 속성만을 묻는 질문은 절대 생성하지 마세요.
+
+7. **질문 다양성**: 3개의 질문은 서로 다른 구조와 조합을 가져야 합니다:
+   - 질문 1: [POS]에 있는 [ATT] 중에서 [기준 객체]로부터 [REL]인 것은?
+   - 질문 2: [기준 객체] [POS]에 위치한 [ATT]에서 [다른 기준]으로부터 [REL]인 것은?
+   - 질문 3: [POS]의 [ATT] 중 [기준 객체]와 [REL]인 것은?
+
+8. **CRITICAL - 정답 및 선택지 요구사항 (소거법을 위한 선택지 구성)**:
+   - **정답은 반드시 이미지의 bbox 객체여야 함** (COCO 어노테이션에 존재하는 객체)
+   - **CRITICAL - 선택지는 반드시 이미지 내에 존재하는 객체만 사용**:
+     * 각 선택지는 이미지 분석 결과와 COCO 어노테이션에서 확인된 객체만 사용하세요.
+     * 이미지에 존재하지 않는 객체를 선택지로 사용하는 것은 절대 금지입니다.
+     * 예를 들어, 이미지에 "파란색 잡지"가 없다면 "파란색 잡지"를 선택지로 사용하지 마세요.
+     * 이미지에 "노란색 컵"이 없다면 "노란색 컵"을 선택지로 사용하지 마세요.
+     * 이미지 분석 결과와 COCO 객체 정보를 정확히 확인하여 실제로 존재하는 객체만 선택지로 사용하세요.
+   - **소거법(Elimination Method)을 위한 선택지 구성**: 각 선택지는 서로 다른 이유로 제외될 수 있어야 함
+     * 예시 질문: "이미지 중앙에 있는 싱크대의 오른쪽 사이드 위치한 흰색 색상의 객체에서 가장 멀리 떨어져 있는 것은?"
+     * 올바른 선택지 구성:
+       - a: cup (싱크대 왼쪽에 위치 → 위치 조건 불만족)
+       - b: dining table (싱크대 오른쪽에 위치하지만 흰색이 아님 → 색상 조건 불만족)
+       - c: coffee machine (싱크대 오른쪽에 위치하고 흰색이지만, d보다 가까움 → 거리 조건 불만족)
+       - d: microwave (정답: 싱크대 오른쪽, 흰색, 가장 멀리 떨어져 있음)
+     * 소거법 rationale 예시:
+       - "a가 아닌 이유: 싱크대 왼쪽에 위치하기 때문"
+       - "b가 아닌 이유: 싱크대 오른쪽에 위치하지만 흰색이 아니기 때문"
+       - "c가 아닌 이유: d보다 더 가까이 있기 때문"
+       - "d가 정답인 이유: d가 c보다 더 멀리 떨어져 있기 때문"
+   
+   - **선택지 구성 원칙**:
+     * 각 선택지는 질문의 조건 중 하나를 만족하지 않아야 함 (위치, 색상, 속성, 거리 등)
+     * 정답을 제외한 나머지 선택지들은 각각 다른 이유로 제외될 수 있어야 함
+     * 같은 종류의 객체가 여러 개 있을 경우, 반드시 구분 가능한 속성으로 명시
+       - ✅ 올바른 예시: "red cup", "blue cup", "leftmost cup", "rightmost cup"
+       - ✅ 올바른 예시: "green t-shirt person", "blue shirt man", "white shirt woman"
+       - ❌ 잘못된 예시: "작은 컵", "큰 컵", "중간 크기 컵" (주관적 크기 표현 금지)
+       - ❌ 잘못된 예시: "예쁜 꽃병", "멋진 의자" (주관적 미적 판단 금지)
+     * **CRITICAL - 선택지 검증**: 각 선택지는 반드시 이미지 분석 결과와 COCO 어노테이션에서 확인된 객체여야 합니다.
+     * 이미지에 존재하지 않는 객체를 선택지로 사용하는 것은 절대 금지입니다.
+     * 예를 들어, 이미지에 "파란색 잡지"가 없다면 "파란색 잡지"를 선택지로 사용하지 마세요.
+     * 이미지에 "노란색 컵"이 없다면 "노란색 컵"을 선택지로 사용하지 마세요.
+     * 각 선택지는 bbox로 식별 가능해야 하며, 이미지 내에 실제로 존재해야 합니다.
+     * 선택지 간 모호성이 없어야 함 (같은 객체를 가리키는 다른 표현 사용 금지)
+     * 이미지 분석 결과에서 언급된 색상, 위치, 속성 정보를 활용하여 선택지를 명확히 구분하세요
+     * **CRITICAL**: 선택지에도 추상적 표현(크기, 미적 판단 등)을 절대 사용하지 말고, 객관적이고 구체적인 속성(색상, 모양, 재질, 위치 등)만 사용하세요
+
+9. **CRITICAL - 위치 표현 명확성 및 반전 규칙**:
+   - ❌ 절대 사용 금지: "이미지 중앙에", "이미지 왼쪽에", "이미지 오른쪽에" (모호함 - 중앙의 기준이 사람마다 다름)
+   - ✅ 반드시 사용: 구체적인 객체를 기준으로 위치 설명
+     * "테이블 중앙에", "소파 왼쪽에", "싱크대 오른쪽에"
+     * "카운터 중앙에", "냉장고 왼쪽에", "식탁 오른쪽에"
+   - 위치를 설명할 때는 반드시 구체적인 객체(테이블, 소파, 싱크대, 카운터, 식탁, 냉장고 등)를 기준으로 하세요.
+   - 이미지 분석 결과에서 언급된 구체적인 객체를 활용하여 위치를 명확히 설명하세요.
+   - **CRITICAL - 위치 반전 규칙**: 질문 생성 시 "왼쪽"과 "오른쪽"을 반드시 반대로 변환하세요:
+     * 실제로 "왼쪽"에 있는 경우 → 질문에서는 "오른쪽"으로 표현
+     * 실제로 "오른쪽"에 있는 경우 → 질문에서는 "왼쪽"으로 표현
+     * 이 규칙은 모든 위치 표현에 적용됩니다 (예: "왼쪽 사이드" → "오른쪽 사이드", "오른쪽에" → "왼쪽에")
+
+10. **CRITICAL - 표현의 객관성 및 구체성**:
+   - ❌ 절대 사용 금지 - 추상적이고 주관적인 표현:
+     * 크기 관련: "작은", "큰", "중간 크기", "보통 크기", "적당한 크기"
+     * 미적 판단: "예쁜", "멋진", "좋은", "나쁜", "아름다운"
+     * 모호한 표현: "일반적인", "특별한", "보통의"
+   
+   - ✅ 반드시 사용 - 객관적이고 구체적인 표현:
+     * 색상: "빨간색", "파란색", "흰색", "검은색", "녹색"
+     * 모양: "정사각형", "원형", "직사각형", "둥근", "각진"
+     * 재질: "나무", "유리", "금속", "플라스틱", "천"
+     * 기능/용도: "식용 가능한", "의자", "테이블", "컵", "책"
+     * 위치: "왼쪽", "오른쪽", "중앙", "위", "아래" (구체적 객체 기준)
+     * 패턴: "줄무늬", "체크 무늬", "단색", "무늬 있는"
+   
+   - 질문과 선택지 모두에서 객관적이고 구체적인 속성만 사용하세요.
+   - 이미지 분석 결과에서 확인 가능한 구체적인 정보를 활용하세요.
+
+11. **기타 요구사항**:
+   - exo-centric 관점 (외부 관찰자 시점)
+   - 4개의 객관식 선택지 (a, b, c, d)
+   - 한글로 질문 생성 (ATT, POS, REL 태그는 포함하지 않음 - 나중에 번역 시 추가됨)
+
+**소거법을 위한 선택지 구성 예시**:
+질문: "싱크대의 왼쪽 사이드에 위치한 흰색 색상의 객체에서 가장 멀리 떨어져 있는 것은?"
+→ ❌ "이미지 중앙에 있는 싱크대" (모호함) 대신 ✅ "싱크대" (구체적)
+→ **위치 반전**: 실제로 "오른쪽"에 있으면 질문에서는 "왼쪽"으로 표현
+선택지:
+- a: cup (위치 조건 불만족 - 싱크대 왼쪽에 위치)
+- b: dining table (색상 조건 불만족 - 싱크대 오른쪽이지만 흰색이 아님)
+- c: coffee machine (거리 조건 불만족 - 흰색이고 오른쪽이지만 d보다 가까움)
+- d: microwave (정답 - 모든 조건 만족하고 가장 멀리 떨어져 있음)
+
+소거법 rationale:
+- "a가 아닌 이유: 싱크대 왼쪽에 위치하기 때문"
+- "b가 아닌 이유: 싱크대 오른쪽에 위치하지만 흰색이 아니기 때문"
+- "c가 아닌 이유: d보다 더 가까이 있기 때문"
+- "d가 정답인 이유: d가 c보다 더 멀리 떨어져 있기 때문"
+
+출력 형식 (반드시 JSON 형식으로, 정확히 3개만 생성):
+{{
+  "questions": [
+    {{
+      "question": "첫 번째 3-hop 한글 질문 (ATT, POS, REL 모두 포함, 소거법 가능한 선택지 구성)",
+      "choices": {{
+        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함)",
+        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함)",
+        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함)",
+        "d": "선택지 d (한글, 정답)"
+      }},
+      "correct_answer": "a"
+    }},
+    {{
+      "question": "두 번째 3-hop 한글 질문 (첫 번째와 다른 구조/조합, 소거법 가능한 선택지 구성)",
+      "choices": {{
+        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함)",
+        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함)",
+        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함)",
+        "d": "선택지 d (한글, 정답)"
+      }},
+      "correct_answer": "b"
+    }},
+    {{
+      "question": "세 번째 3-hop 한글 질문 (앞의 두 질문과 다른 구조/조합, 소거법 가능한 선택지 구성)",
+      "choices": {{
+        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함)",
+        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함)",
+        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함)",
+        "d": "선택지 d (한글, 정답)"
+      }},
+      "correct_answer": "c"
+    }}
+  ]
+}}
+
+**중요**: 정확히 3개의 질문만 생성하고, 각 질문은 반드시 ATT, POS, REL 세 가지 요소를 모두 포함해야 하며, 서로 다른 구조와 조합을 가져야 합니다. 반드시 유효한 JSON 형식으로 응답하세요."""
+
+        generation_response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a professional VQA question generator specializing in 3-hop questions with elimination method rationale support. CRITICAL REQUIREMENTS: 1) Each question MUST include ATT (attribute), POS (position), and REL (relationship) elements. 2) The correct answer MUST be an object with a bbox in the COCO annotations. 3) Multiple choice options MUST be designed for elimination method - each wrong answer should fail a different condition (location, color, attribute, distance, etc.) so they can be eliminated for different reasons. 4) Choices MUST be clearly distinguishable (use color, position, attributes like 'red cup', 'green t-shirt person', 'leftmost chair' when objects of the same type exist). 5) For POS (position), NEVER use vague expressions like 'in the center of the image' or 'on the left side of the image' - ALWAYS use specific object references like 'in the center of the table', 'on the left side of the sofa', 'to the right of the sink'. 6) CRITICAL - Position reversal rule: When generating questions, you MUST reverse left/right positions - if something is actually on the left, describe it as on the right in the question, and vice versa. 7) CRITICAL - Objective and specific expressions only: NEVER use subjective or abstract expressions like 'small', 'large', 'medium-sized', 'pretty', 'nice', 'beautiful' - ALWAYS use objective, measurable attributes like color ('red', 'blue', 'white'), shape ('round', 'square', 'rectangular'), material ('wood', 'glass', 'metal'), function ('edible', 'chair', 'table'), or specific location ('left', 'right', 'center' relative to specific objects). 8) CRITICAL - Question type restriction: NEVER generate questions asking about abstract properties like 'what color is it?', 'what type is it?', 'what kind is it?', 'what shape is it?' - ALWAYS ask about specific objects in the image (e.g., 'which object is...', 'what is...'). Questions must ask about concrete objects, not abstract attributes. 9) CRITICAL - Choices must only include objects that exist in the image: Each choice option MUST be an object that actually exists in the image according to the image analysis and COCO annotations. NEVER include objects that don't exist in the image as choice options. Verify each choice against the image analysis results and COCO object information. 10) Generate exactly 3 questions with different structures and combinations. 11) Always return valid JSON format."
+                },
+                {
+                    "role": "user",
+                    "content": question_generation_prompt
+                }
+            ],
+            temperature=0.8,
+            max_tokens=2500,
+            response_format={"type": "json_object"}
+        )
+        
+        generated_content = generation_response.choices[0].message.content.strip()
+        
+        # JSON 파싱
+        try:
+            import json
+            generated_data = json.loads(generated_content)
+            questions = generated_data.get('questions', [])
+            
+            if not questions:
+                return jsonify({'success': False, 'error': 'No questions generated'}), 500
+            
+            # 정확히 3개만 반환 (더 많으면 앞의 3개만)
+            if len(questions) > 3:
+                questions = questions[:3]
+            elif len(questions) < 3:
+                return jsonify({'success': False, 'error': f'Expected 3 questions but got {len(questions)}'}), 500
+            
+            return jsonify({
+                'success': True,
+                'image_id': image_id,
+                'questions': questions
+            })
+        except json.JSONDecodeError as e:
+            # JSON 파싱 실패 시 텍스트에서 추출 시도
+            return jsonify({'success': False, 'error': f'Failed to parse JSON: {str(e)}', 'raw_response': generated_content}), 500
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/translate/question_and_choices', methods=['POST'])
 def translate_question_and_choices():
     """Translate Korean question and choices to English together using GPT-5, with image analysis context."""
@@ -703,6 +1126,18 @@ Korean choices:
 (c) {choice_c}
 (d) {choice_d}
 
+CRITICAL - Choice Translation Format:
+- Use concise, intuitive adjective+noun or noun+noun format (NOT full sentences)
+- Examples:
+  * "a person in a black shirt" → "black shirt person"
+  * "a person wearing glasses" → "glasses person"
+  * "a cup on the table" → "table cup" or "cup"
+  * "a red chair" → "red chair"
+  * "a man with a blue t-shirt" → "blue t-shirt man"
+- DO NOT use full sentences like "a person who is wearing a black shirt"
+- DO NOT use articles "a" or "the" unless necessary
+- Keep choices short and intuitive
+
 Translate the Korean question and choices to English following the EXACT format above. Make sure:
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
@@ -710,12 +1145,13 @@ Translate the Korean question and choices to English following the EXACT format 
 - All tags have meaningful content inside them
 - Tags are naturally embedded in the question sentence
 - <choice> tag comes before "And provide..." phrase
-- DO NOT use generic phrases like "in the image" for <POS> tag"""
+- DO NOT use generic phrases like "in the image" for <POS> tag
+- Choices are in concise adjective+noun or noun+noun format"""
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 6) DO NOT use generic phrases like 'in the image' for <POS> tag."},
+                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 6) DO NOT use generic phrases like 'in the image' for <POS> tag, 7) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3

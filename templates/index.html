@@ -478,8 +478,18 @@
             <div class="control-panel-left">
                 <!-- 노란색 칸: Question 한글 입력 -->
                 <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="questionKo" style="font-size: 0.8rem; margin-bottom: 2px;">Question (한글): 
-                        <span style="color: red;">*</span></label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                        <label for="questionKo" style="font-size: 0.8rem; margin: 0;">Question (한글): 
+                            <span style="color: red;">*</span></label>
+                        <button type="button" onclick="generateQuestions()" id="generateQuestionBtn" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">질문 자동 생성</button>
+                    </div>
+                    <div id="questionCandidatesContainer" style="display: none; margin-bottom: 4px; padding: 8px; background-color: #f0f0f0; border-radius: 4px; width: 100%; box-sizing: border-box;">
+                        <label style="font-size: 0.75rem; margin-bottom: 4px; display: block; font-weight: bold;">질문 후보 선택:</label>
+                        <div id="questionCandidates" style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+                            <!-- 질문 후보가 여기에 동적으로 추가됨 -->
+                        </div>
+                        <button type="button" onclick="regenerateQuestions()" id="regenerateQuestionBtn" style="margin-top: 4px; padding: 3px 6px; font-size: 0.65rem; background-color: #2196F3; color: white; border: none; border-radius: 3px; cursor: pointer;">다시 생성</button>
+                    </div>
                     <textarea id="questionKo" rows="8" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;" placeholder="한글 질문을 입력하세요"></textarea>
                 </div>
                 
@@ -806,6 +816,11 @@
                             document.getElementById('viewEgo').checked = false;
                         }
                     }
+                    
+                    // 질문 후보 컨테이너 숨기기 (새 이미지 로드 시)
+                    document.getElementById('questionCandidatesContainer').style.display = 'none';
+                    currentQuestionCandidates = [];
+                    isGenerating = false;
                     
                     updateBboxDisplay();
                     updateStatus();
@@ -1313,6 +1328,200 @@
 
         // Auto-save every 30 seconds
         setInterval(autoSave, 30000);
+        
+        // 질문 자동 생성 함수들
+        let currentQuestionCandidates = [];
+        let isGenerating = false;
+        
+        function generateQuestions() {
+            if (!currentImageData || !currentImageData.image_id) {
+                alert('이미지 정보를 찾을 수 없습니다.');
+                return;
+            }
+            
+            if (isGenerating) {
+                alert('이미 질문 생성 중입니다. 잠시만 기다려주세요.');
+                return;
+            }
+            
+            isGenerating = true;
+            const button = document.getElementById('generateQuestionBtn');
+            const originalText = button.textContent;
+            button.textContent = '생성 중...';
+            button.disabled = true;
+            
+            updateStatus('이미지 분석 중... (1/2 단계)');
+            
+            fetch('/api/generate_question_and_choices', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    image_id: currentImageData.image_id,
+                    index: currentIndex
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                button.textContent = originalText;
+                button.disabled = false;
+                isGenerating = false;
+                
+                if (data.success) {
+                    currentQuestionCandidates = data.questions || [];
+                    if (currentQuestionCandidates.length > 0) {
+                        displayQuestionCandidates(currentQuestionCandidates);
+                        updateStatus(`질문 생성 완료! ${currentQuestionCandidates.length}개의 후보가 생성되었습니다.`);
+                    } else {
+                        alert('질문이 생성되지 않았습니다.');
+                        updateStatus('질문 생성 실패: 후보가 없습니다.');
+                    }
+                } else {
+                    alert('질문 생성 실패: ' + (data.error || '알 수 없는 오류'));
+                    updateStatus('질문 생성 실패');
+                }
+            })
+            .catch(error => {
+                button.textContent = originalText;
+                button.disabled = false;
+                isGenerating = false;
+                console.error('질문 생성 오류:', error);
+                alert('질문 생성 중 오류가 발생했습니다: ' + error.message);
+                updateStatus('질문 생성 오류');
+            });
+        }
+        
+        function displayQuestionCandidates(questions) {
+            const container = document.getElementById('questionCandidatesContainer');
+            const candidatesDiv = document.getElementById('questionCandidates');
+            
+            if (!questions || questions.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            
+            // 기존 후보 제거
+            candidatesDiv.innerHTML = '';
+            
+            // 각 질문 후보를 버튼 기반으로 표시
+            questions.forEach((q, index) => {
+                const questionCard = document.createElement('div');
+                questionCard.style.width = '100%';
+                questionCard.style.marginBottom = '8px';
+                questionCard.style.padding = '10px';
+                questionCard.style.backgroundColor = '#fff';
+                questionCard.style.borderRadius = '4px';
+                questionCard.style.border = '2px solid #ddd';
+                questionCard.style.boxSizing = 'border-box';
+                
+                const questionText = document.createElement('div');
+                questionText.style.fontWeight = 'bold';
+                questionText.style.fontSize = '0.8rem';
+                questionText.style.lineHeight = '1.6';
+                questionText.style.color = '#333';
+                questionText.style.marginBottom = '6px';
+                questionText.style.wordWrap = 'break-word';
+                questionText.style.wordBreak = 'keep-all';
+                questionText.textContent = `질문 ${index + 1}: ${q.question}`;
+                
+                const choicesText = document.createElement('div');
+                choicesText.style.fontSize = '0.75rem';
+                choicesText.style.color = '#666';
+                choicesText.style.lineHeight = '1.5';
+                choicesText.style.marginBottom = '8px';
+                choicesText.style.wordWrap = 'break-word';
+                choicesText.style.wordBreak = 'keep-all';
+                
+                // 괄호 안의 내용을 제거하는 함수
+                function removeParentheses(text) {
+                    if (!text) return '';
+                    // 괄호와 그 안의 내용을 제거 (한글/영문 괄호 모두 처리)
+                    return text.replace(/[\(（].*?[\)）]/g, '').trim();
+                }
+                
+                // 정답 표시 (괄호 안의 설명 제거, 정답은 초록색으로만 표시)
+                const correctAnswer = q.correct_answer || 'a';
+                const choiceA = removeParentheses(q.choices.a);
+                const choiceB = removeParentheses(q.choices.b);
+                const choiceC = removeParentheses(q.choices.c);
+                const choiceD = removeParentheses(q.choices.d);
+                const choicesHtml = `(a) ${correctAnswer === 'a' ? `<span style="color: #4CAF50; font-weight: bold;">${choiceA}</span>` : choiceA}, (b) ${correctAnswer === 'b' ? `<span style="color: #4CAF50; font-weight: bold;">${choiceB}</span>` : choiceB}, (c) ${correctAnswer === 'c' ? `<span style="color: #4CAF50; font-weight: bold;">${choiceC}</span>` : choiceC}, (d) ${correctAnswer === 'd' ? `<span style="color: #4CAF50; font-weight: bold;">${choiceD}</span>` : choiceD}`;
+                choicesText.innerHTML = `<span style="font-weight: 500;">선택지:</span> ${choicesHtml}`;
+                
+                const selectButton = document.createElement('button');
+                selectButton.type = 'button';
+                selectButton.textContent = '이 질문 선택';
+                selectButton.style.width = '100%';
+                selectButton.style.padding = '6px';
+                selectButton.style.fontSize = '0.75rem';
+                selectButton.style.backgroundColor = '#2196F3';
+                selectButton.style.color = 'white';
+                selectButton.style.border = 'none';
+                selectButton.style.borderRadius = '3px';
+                selectButton.style.cursor = 'pointer';
+                selectButton.style.fontWeight = '500';
+                
+                selectButton.addEventListener('click', () => {
+                    selectQuestionCandidate(index);
+                });
+                
+                questionCard.appendChild(questionText);
+                questionCard.appendChild(choicesText);
+                questionCard.appendChild(selectButton);
+                
+                candidatesDiv.appendChild(questionCard);
+            });
+            
+            container.style.display = 'block';
+        }
+        
+        function selectQuestionCandidate(index) {
+            if (!currentQuestionCandidates || index >= currentQuestionCandidates.length) {
+                return;
+            }
+            
+            const selectedQuestion = currentQuestionCandidates[index];
+            
+            // Question (한글) 입력 필드에 질문 설정
+            document.getElementById('questionKo').value = selectedQuestion.question;
+            
+            // 괄호 안의 내용을 제거하는 함수
+            function removeParentheses(text) {
+                if (!text) return '';
+                // 괄호와 그 안의 내용을 제거 (한글/영문 괄호 모두 처리)
+                return text.replace(/[\(（].*?[\)）]/g, '').trim();
+            }
+            
+            // Choices 입력 필드에 선택지 설정 (괄호 안의 설명 제거)
+            document.getElementById('choiceA').value = removeParentheses(selectedQuestion.choices.a);
+            document.getElementById('choiceB').value = removeParentheses(selectedQuestion.choices.b);
+            document.getElementById('choiceC').value = removeParentheses(selectedQuestion.choices.c);
+            document.getElementById('choiceD').value = removeParentheses(selectedQuestion.choices.d);
+            
+            // 정답 라디오 버튼 선택
+            const correctAnswer = selectedQuestion.correct_answer || 'a';
+            document.getElementById(`choiceCheck${correctAnswer.toUpperCase()}`).checked = true;
+            
+            updateStatus(`질문 ${index + 1} 선택 완료. 필요시 수정 후 번역하세요.`);
+        }
+        
+        function regenerateQuestions() {
+            if (isGenerating) {
+                alert('이미 질문 생성 중입니다. 잠시만 기다려주세요.');
+                return;
+            }
+            
+            // 기존 후보 숨기기
+            document.getElementById('questionCandidatesContainer').style.display = 'none';
+            currentQuestionCandidates = [];
+            
+            // 다시 생성
+            generateQuestions();
+        }
         
         // 번역 함수들 (추후 구현)
         function translateQuestion() {
