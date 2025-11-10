@@ -15,6 +15,22 @@ MS-COCO 데이터셋 이미지를 사용하여 Visual Question Answering (VQA) �
 
 ## 🚀 실행 방법
 
+### 0. 권장 환경 설정
+
+```bash
+# (선택) 가상환경 생성
+python -m venv .venv
+
+# 가상환경 활성화
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# macOS / Linux
+source .venv/bin/activate
+```
+
+가상환경을 사용하면 패키지 버전 충돌을 방지하고 OpenAI SDK를 안전하게 관리할 수 있습니다.
+
 ### 1. 필수 패키지 설치
 
 ```bash
@@ -49,6 +65,8 @@ OPENAI_API_KEY = "your-api-key-here"
 python coco_web_annotator.py --mscoco_folder ./mscoco --coco_json ./mscoco/instances_train2017.json --output_json ./mscoco/web_annotations.json
 ```
 
+> **주의**: `--output_json` 인자는 필수이며, 지정한 파일명을 기준으로 `_exo.json`, `_ego.json` 두 개의 결과 파일이 생성됩니다.
+
 또는 커스텀 설정으로 실행:
 
 ```bash
@@ -77,6 +95,18 @@ python coco_web_annotator.py \
   - `pycocotools`: COCO 데이터셋 처리
   - `openai`: 번역 및 검수 기능 (선택사항)
 
+### 🔧 실행 옵션 요약
+
+`coco_web_annotator.py`는 다음과 같은 CLI 옵션을 제공합니다:
+
+- `--mscoco_folder` (기본값 `./mscoco`): `exo_images`, `ego_images` 폴더가 포함된 루트 경로
+- `--coco_json` (기본값 `/Data/MSCOCO/annotations/instances_train2017.json`): COCO 어노테이션 JSON 경로
+- `--output_json` (**필수**): 저장할 어노테이션 파일 이름 (실제로는 `_exo.json`, `_ego.json` 두 파일 생성)
+- `--categories_json`: `{ "id": <int>, "name": <str> }` 형식의 커스텀 카테고리 매핑 파일
+- `--host`, `--port`: Flask 서버 바인딩 설정 (기본값 `0.0.0.0:5000`)
+
+출력 경로의 상위 폴더가 존재하지 않으면 자동으로 생성되며, 템플릿 폴더에 `index.html`이 없을 경우 최초 실행 시 자동 생성합니다.
+
 ## 📁 프로젝트 구조
 
 ```
@@ -95,6 +125,8 @@ etri_annotation_tool/
     └── index.html             # 웹 인터페이스 템플릿
 ```
 
+`templates/index.html` 파일은 서버 최초 실행 시 자동으로 생성됩니다. 커스터마이징한 템플릿을 덮어쓰지 않으려면 생성된 파일을 버전 관리하거나 별도로 백업해 두세요.
+
 ### ⚠️ 중요: 로컬에 필요한 파일 구성
 
 다음 파일들은 용량이 크거나 Git에 포함되지 않으므로, **로컬 환경에서 직접 구성해야 합니다**:
@@ -105,6 +137,15 @@ etri_annotation_tool/
 - `mscoco/ego_images/` - Ego 이미지 폴더
 
 이 파일들은 `.gitignore`에 포함되어 있어 Git 저장소에는 업로드되지 않습니다. 프로젝트를 사용하려면 해당 경로에 위 파일들을 직접 구성해야 합니다.
+
+## 🔑 OpenAI 연동 가이드
+
+- `openai` 패키지를 설치하지 않아도 UI와 수동 작성 기능은 사용 가능하지만, **자동 번역 / 이미지 분석 / 검수** 기능을 사용하려면 OpenAI SDK와 API 키가 필요합니다.
+- API 키 설정 방법:
+  - `config.py.example`를 복사하여 `config.py`로 저장하고 `OPENAI_API_KEY` 값을 입력 (권장)
+  - 또는 운영체제 환경 변수 `OPENAI_API_KEY`를 설정 (`PowerShell` 예: `setx OPENAI_API_KEY "sk-..."`)
+- 키가 없거나 잘못되면 관련 API는 500 에러를 반환하며, 브라우저 알림과 서버 로그에서 오류 메시지가 출력됩니다.
+- 이미지 분석 결과는 메모리 캐시(`image_analysis_cache`)에 저장되어 같은 이미지를 반복 분석하지 않습니다. 서버를 재시작하면 캐시가 초기화됩니다.
 
 ## ✨ 주요 기능
 
@@ -261,7 +302,7 @@ python coco_web_annotator.py ... --port 5001
 
 ## 🛠️ 유틸리티 스크립트
 
-`annotation_utils.py`는 어노테이션 파일 관리 유틸리티를 제공합니다:
+`annotation_utils.py`는 어노테이션 파일 관리 유틸리티를 제공합니다. 각 명령은 실행 전 대상 JSON을 자동으로 백업(`.backup`, `.backup2`)하므로, 문제가 생기면 백업 파일로 복원할 수 있습니다.
 
 ```bash
 # image_resolution 필드 추가
@@ -279,6 +320,20 @@ python annotation_utils.py organize_images \
     --ego_json ./mscoco/web_annotations_ego.json \
     --mscoco_folder ./mscoco
 ```
+
+## 🌐 내부 API 엔드포인트 요약
+
+프론트엔드와 외부 스크립트에서 활용 가능한 주요 REST API는 다음과 같습니다:
+
+- `GET /api/image/<index>`: 인덱스에 해당하는 이미지 정보와 기존 어노테이션 반환
+- `GET /api/analyze_image/<index>`: OpenAI 비전 모델을 이용한 이미지 분석 (캐시 적용)
+- `POST /api/translate/question`, `/api/translate/choices`, `/api/translate/question_and_choices`: 한글 질문·선택지를 영어 포맷으로 변환
+- `POST /api/translate/rationale`: 한글 근거를 영어 소거법 형식으로 변환
+- `POST /api/review_translation`: 번역문 문법 검수 및 수정 제안
+- `POST /api/save`: bbox와 번역 결과를 저장
+- `GET /api/find/<image_id>`: COCO `image_id`로 데이터셋 인덱스 조회
+
+번역·분석 관련 엔드포인트는 OpenAI API 키가 설정되지 않으면 500 에러를 반환하므로, 자동화 시 예외 처리가 필요합니다.
 
 ## 📝 참고사항
 

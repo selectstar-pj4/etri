@@ -103,6 +103,29 @@
         .bbox.hidden {
             display: none !important;
         }
+        .bbox.drawing {
+            border: 2px dashed rgba(0, 255, 0, 0.8);
+            background-color: rgba(0, 255, 0, 0.15);
+            cursor: crosshair;
+        }
+        .bbox.user-drawn {
+            border: 2px solid rgba(255, 165, 0, 0.8);
+            background-color: rgba(255, 165, 0, 0.15);
+        }
+        .bbox.user-drawn.selected {
+            border-color: rgba(0, 0, 255, 0.9);
+            background-color: rgba(0, 0, 255, 0.2);
+        }
+        .image-container.drawing-mode {
+            cursor: crosshair;
+        }
+        .drawing-rect {
+            position: absolute;
+            border: 2px dashed rgba(0, 255, 0, 0.8);
+            background-color: rgba(0, 255, 0, 0.1);
+            pointer-events: none;
+            z-index: 1000;
+        }
         .form-group { margin-bottom: 10px; }
         label { 
             display: block; 
@@ -553,6 +576,7 @@
                             <input type="checkbox" id="bboxToggle" checked onchange="toggleBboxes()" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
                             <label for="bboxToggle" style="font-size: 0.75rem; font-weight: 700; margin: 0; cursor: pointer; white-space: nowrap; user-select: none; color: #2e7d32;">Bbox</label>
                         </div>
+                        <button id="drawBboxBtn" onclick="toggleDrawMode()" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer;">Draw Bbox</button>
                         <label for="searchId" style="margin: 0; margin-right: 4px; font-size: 0.75rem; flex-shrink: 0;">Image ID:</label>
                         <div style="flex: 1; min-width: 0; display: flex; gap: 4px;">
                             <input id="searchId" type="number" placeholder="ex 184613" style="flex: 1; min-width: 0; padding: 4px; font-size: 0.75rem;">
@@ -621,6 +645,12 @@
         let currentImageData = null;
         let selectedBboxes = [];
         let bboxElements = [];
+        let isDrawMode = false;
+        let isDrawing = false;
+        let drawStartX = 0;
+        let drawStartY = 0;
+        let drawingRect = null;
+        let userDrawnBboxes = []; // 사용자가 직접 그린 bbox들
         
         // Bbox 표시/숨김 토글 함수
         function toggleBboxes() {
@@ -726,6 +756,7 @@
                             ? data.existing_annotation.bbox 
                             : null;
                         drawBboxes();
+                        setupDrawingEvents(); // 그리기 이벤트 설정
                     };
                     
                     // Update info
@@ -746,6 +777,24 @@
                         document.getElementById('question').value = existingQuestion;
                         document.getElementById('response').value = existingResponse;
                         document.getElementById('rationale').value = existingRationale;
+                        
+                        // 기존 bbox 로드
+                        const existingBbox = data.existing_annotation.bbox;
+                        if (existingBbox) {
+                            // bbox가 배열의 배열인지 단일 배열인지 확인
+                            if (Array.isArray(existingBbox[0])) {
+                                // 여러 bbox
+                                selectedBboxes = existingBbox.map(b => Array.isArray(b) ? b : [b]);
+                            } else {
+                                // 단일 bbox
+                                selectedBboxes = [existingBbox];
+                            }
+                        } else {
+                            selectedBboxes = [];
+                        }
+                        
+                        // userDrawnBboxes 초기화 (새 이미지 로드 시)
+                        userDrawnBboxes = [];
                         
                         // 새로운 필드에 값 설정
                         document.getElementById('questionKo').value = existingQuestion;
@@ -796,10 +845,12 @@
                         document.getElementById('rationaleKo').value = '';
                         document.getElementById('choiceA').value = '';
                         document.getElementById('choiceB').value = '';
+                        
+                        // bbox 초기화
+                        selectedBboxes = [];
+                        userDrawnBboxes = [];
                         document.getElementById('choiceC').value = '';
                         document.getElementById('choiceD').value = '';
-                        
-                        selectedBboxes = [];
                         
                         // 이미지가 있는 폴더에 따라 view 자동 설정
                         if (data.view_type) {
@@ -929,6 +980,40 @@
                 container.appendChild(div);
                 bboxElements.push(div);
             });
+
+            // 사용자가 직접 그린 bbox 렌더링
+            userDrawnBboxes.forEach((bbox) => {
+                const [x, y, w, h] = bbox;
+                const scaledX = x * scale;
+                const scaledY = y * scale;
+                const scaledW = w * scale;
+                const scaledH = h * scale;
+
+                const div = document.createElement('div');
+                div.className = 'bbox user-drawn';
+                div.style.left = `${scaledX}px`;
+                div.style.top = `${scaledY}px`;
+                div.style.width = `${scaledW}px`;
+                div.style.height = `${scaledH}px`;
+                div.style.zIndex = '999999'; // 사용자 그린 bbox는 항상 위에
+
+                const label = document.createElement('div');
+                label.className = 'bbox-label';
+                label.textContent = `User: [${x.toFixed(2)}, ${y.toFixed(2)}, ${w.toFixed(2)}, ${h.toFixed(2)}]`;
+                div.appendChild(label);
+
+                if (selectedBboxes.some(sb => JSON.stringify(sb) === JSON.stringify(bbox))) {
+                    div.classList.add('selected');
+                }
+
+                div.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectBbox(bbox, div);
+                });
+
+                container.appendChild(div);
+                bboxElements.push(div);
+            });
             
             // 토글 상태에 따라 초기 표시/숨김 설정
             const toggleCheck = document.getElementById('bboxToggle');
@@ -1023,9 +1108,221 @@
 
         function clearBboxes() {
             selectedBboxes = [];
+            userDrawnBboxes = [];
             updateBboxDisplay();
             drawBboxes();
         }
+
+        // Draw Bbox 모드 토글
+        function toggleDrawMode() {
+            isDrawMode = !isDrawMode;
+            const btn = document.getElementById('drawBboxBtn');
+            const container = document.getElementById('imageContainer');
+            
+            if (isDrawMode) {
+                btn.textContent = 'Stop Drawing';
+                btn.style.backgroundColor = '#f44336';
+                container.classList.add('drawing-mode');
+                updateStatus('Draw Bbox 모드: 이미지에서 드래그하여 bbox를 그리세요');
+            } else {
+                btn.textContent = 'Draw Bbox';
+                btn.style.backgroundColor = '#ff9800';
+                container.classList.remove('drawing-mode');
+                updateStatus('Ready');
+                // 그리는 중이면 취소
+                if (isDrawing) {
+                    cancelDrawing();
+                }
+            }
+        }
+
+        // 이미지 컨테이너에 마우스 이벤트 추가
+        function setupDrawingEvents() {
+            const container = document.getElementById('imageContainer');
+            if (!container) return;
+
+            // 기존 이벤트 리스너 제거 (중복 방지)
+            container.removeEventListener('mousedown', handleMouseDown);
+            container.removeEventListener('mousemove', handleMouseMove);
+            container.removeEventListener('mouseup', handleMouseUp);
+            container.removeEventListener('mouseleave', handleMouseLeave);
+
+            // 새 이벤트 리스너 추가
+            container.addEventListener('mousedown', handleMouseDown);
+            container.addEventListener('mousemove', handleMouseMove);
+            container.addEventListener('mouseup', handleMouseUp);
+            container.addEventListener('mouseleave', handleMouseLeave);
+        }
+
+        function handleMouseDown(e) {
+            if (!isDrawMode) return;
+            if (e.target.tagName === 'IMG' || e.target.classList.contains('bbox')) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            const container = document.getElementById('imageContainer');
+            const rect = container.getBoundingClientRect();
+            const img = document.getElementById('image');
+            
+            // 이미지 영역 내에서만 그리기
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // 이미지 영역 확인
+            const imgRect = img.getBoundingClientRect();
+            const imgLeft = imgRect.left - rect.left;
+            const imgTop = imgRect.top - rect.top;
+            const imgWidth = imgRect.width;
+            const imgHeight = imgRect.height;
+            
+            if (x < imgLeft || x > imgLeft + imgWidth || y < imgTop || y > imgTop + imgHeight) {
+                return;
+            }
+            
+            isDrawing = true;
+            drawStartX = x - imgLeft;
+            drawStartY = y - imgTop;
+            
+            // 그리는 사각형 생성
+            drawingRect = document.createElement('div');
+            drawingRect.className = 'drawing-rect';
+            drawingRect.style.left = `${imgLeft + drawStartX}px`;
+            drawingRect.style.top = `${imgTop + drawStartY}px`;
+            drawingRect.style.width = '0px';
+            drawingRect.style.height = '0px';
+            container.appendChild(drawingRect);
+        }
+
+        function handleMouseMove(e) {
+            if (!isDrawMode || !isDrawing) return;
+            
+            const container = document.getElementById('imageContainer');
+            const rect = container.getBoundingClientRect();
+            const img = document.getElementById('image');
+            const imgRect = img.getBoundingClientRect();
+            
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            const imgLeft = imgRect.left - rect.left;
+            const imgTop = imgRect.top - rect.top;
+            const imgWidth = imgRect.width;
+            const imgHeight = imgRect.height;
+            
+            // 이미지 영역 내로 제한
+            let currentX = Math.max(imgLeft, Math.min(x, imgLeft + imgWidth)) - imgLeft;
+            let currentY = Math.max(imgTop, Math.min(y, imgTop + imgHeight)) - imgTop;
+            
+            const width = Math.abs(currentX - drawStartX);
+            const height = Math.abs(currentY - drawStartY);
+            const left = Math.min(drawStartX, currentX);
+            const top = Math.min(drawStartY, currentY);
+            
+            if (drawingRect) {
+                drawingRect.style.left = `${imgLeft + left}px`;
+                drawingRect.style.top = `${imgTop + top}px`;
+                drawingRect.style.width = `${width}px`;
+                drawingRect.style.height = `${height}px`;
+            }
+        }
+
+        function handleMouseUp(e) {
+            if (!isDrawMode || !isDrawing) return;
+            
+            const container = document.getElementById('imageContainer');
+            const rect = container.getBoundingClientRect();
+            const img = document.getElementById('image');
+            const imgRect = img.getBoundingClientRect();
+            
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            const imgLeft = imgRect.left - rect.left;
+            const imgTop = imgRect.top - rect.top;
+            const imgWidth = imgRect.width;
+            const imgHeight = imgRect.height;
+            
+            // 이미지 영역 내로 제한
+            let currentX = Math.max(imgLeft, Math.min(x, imgLeft + imgWidth)) - imgLeft;
+            let currentY = Math.max(imgTop, Math.min(y, imgTop + imgHeight)) - imgTop;
+            
+            const width = Math.abs(currentX - drawStartX);
+            const height = Math.abs(currentY - drawStartY);
+            
+            // 최소 크기 체크 (너무 작은 bbox 방지)
+            if (width > 5 && height > 5) {
+                const left = Math.min(drawStartX, currentX);
+                const top = Math.min(drawStartY, currentY);
+                
+                // 원본 이미지 좌표로 변환
+                const scale = currentImageData.scale || 1.0;
+                const originalX = left / scale;
+                const originalY = top / scale;
+                const originalW = width / scale;
+                const originalH = height / scale;
+                
+                const bbox = [originalX, originalY, originalW, originalH];
+                
+                // userDrawnBboxes에 추가
+                userDrawnBboxes.push(bbox);
+                
+                // selectedBboxes에도 추가
+                if (!selectedBboxes.some(sb => JSON.stringify(sb) === JSON.stringify(bbox))) {
+                    selectedBboxes.push(bbox);
+                }
+                
+                // bbox 그리기 업데이트
+                drawBboxes();
+                updateBboxDisplay();
+                updateStatus(`Bbox 추가됨: [${originalX.toFixed(2)}, ${originalY.toFixed(2)}, ${originalW.toFixed(2)}, ${originalH.toFixed(2)}]`);
+            }
+            
+            cancelDrawing();
+        }
+
+        function handleMouseLeave(e) {
+            if (isDrawing) {
+                cancelDrawing();
+            }
+        }
+
+        function cancelDrawing() {
+            isDrawing = false;
+            if (drawingRect) {
+                drawingRect.remove();
+                drawingRect = null;
+            }
+        }
+
+        // Delete 키로 선택된 bbox 삭제
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                // textarea나 input에 포커스가 있으면 삭제하지 않음
+                if (document.activeElement && 
+                    (document.activeElement.tagName === 'TEXTAREA' || 
+                     document.activeElement.tagName === 'INPUT')) {
+                    return;
+                }
+                
+                // 선택된 bbox 삭제
+                if (selectedBboxes.length > 0) {
+                    // userDrawnBboxes에서도 제거
+                    selectedBboxes.forEach(bbox => {
+                        const index = userDrawnBboxes.findIndex(ub => 
+                            JSON.stringify(ub) === JSON.stringify(bbox));
+                        if (index !== -1) {
+                            userDrawnBboxes.splice(index, 1);
+                        }
+                    });
+                    
+                    selectedBboxes = [];
+                    drawBboxes();
+                    updateBboxDisplay();
+                    updateStatus('선택된 bbox 삭제됨');
+                }
+            }
+        });
 
         function previousImage() {
             if (currentIndex > 0) {
