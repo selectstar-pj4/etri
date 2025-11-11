@@ -554,19 +554,12 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; flex-wrap: wrap; gap: 4px;">
                         <label for="questionKo" style="font-size: 0.8rem; margin: 0;">Question (한글): 
                             <span style="color: red;">*</span></label>
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            <select id="modelSelect" style="padding: 2px 6px; font-size: 0.7rem; border: 1px solid #ccc; border-radius: 3px;">
-                                <option value="openai">GPT-4o-mini</option>
-                            </select>
-                            <button type="button" onclick="generateQuestions()" id="generateQuestionBtn" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">질문 자동 생성</button>
-                        </div>
                     </div>
                     <div id="questionCandidatesContainer" style="display: none; margin-bottom: 4px; padding: 8px; background-color: #f0f0f0; border-radius: 4px; width: 100%; box-sizing: border-box;">
                         <label style="font-size: 0.75rem; margin-bottom: 4px; display: block; font-weight: bold;">질문 후보 선택:</label>
                         <div id="questionCandidates" style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
                             <!-- 질문 후보가 여기에 동적으로 추가됨 -->
                         </div>
-                        <button type="button" onclick="regenerateQuestions()" id="regenerateQuestionBtn" style="margin-top: 4px; padding: 3px 6px; font-size: 0.65rem; background-color: #2196F3; color: white; border: none; border-radius: 3px; cursor: pointer;">다시 생성</button>
                     </div>
                     <textarea id="questionKo" rows="8" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;" placeholder="한글 질문을 입력하세요"></textarea>
                 </div>
@@ -890,6 +883,10 @@
                             document.getElementById('viewEgo').checked = true;
                         }
                     } else {
+                        // 기존 annotation이 없으면 질문 후보 로드 (exo 이미지인 경우만)
+                        if (data.view_type === 'exo') {
+                            loadQuestionCandidate(index);
+                        }
                         // 기존 필드 초기화
                         document.getElementById('question').value = '';
                         document.getElementById('response').value = '';
@@ -1707,6 +1704,13 @@
                 return;
             }
             
+            // 버튼이 제거되었으므로 에러 방지
+            if (!document.getElementById('generateQuestionBtn')) {
+                alert('질문 자동 생성 기능은 제거되었습니다. 질문 후보 JSON 파일을 사용하세요.');
+                isGenerating = false;
+                return;
+            }
+            
             isGenerating = true;
             const button = document.getElementById('generateQuestionBtn');
             const originalText = button.textContent;
@@ -1715,7 +1719,9 @@
             
             updateStatus('이미지 분석 중... (1/2 단계)');
             
-            const selectedModel = document.getElementById('modelSelect').value;
+            // modelSelect가 없으면 기본값 사용
+            const modelSelect = document.getElementById('modelSelect');
+            const selectedModel = modelSelect ? modelSelect.value : 'openai';
             fetch('/api/generate_question_and_choices', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1888,6 +1894,46 @@
             generateQuestions();
         }
         
+        // 질문 후보 로드 함수
+        function loadQuestionCandidate(index) {
+            fetch(`/api/question_candidate/${index}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // 질문 후보가 있으면 textarea에 채우기
+                        const questionKo = data.question || '';
+                        const choices = data.choices || {};
+                        
+                        // questionKo textarea에 질문 채우기
+                        document.getElementById('questionKo').value = questionKo;
+                        
+                        // choices textarea에 선택지 채우기
+                        if (choices.a) document.getElementById('choiceA').value = choices.a;
+                        if (choices.b) document.getElementById('choiceB').value = choices.b;
+                        if (choices.c) document.getElementById('choiceC').value = choices.c;
+                        if (choices.d) document.getElementById('choiceD').value = choices.d;
+                        
+                        // 정답 checkbox 선택
+                        const correctAnswer = data.correct_answer || 'a';
+                        const checkboxes = document.querySelectorAll('input[name="choiceCheck"]');
+                        checkboxes.forEach(cb => {
+                            if (cb.value === correctAnswer) {
+                                cb.checked = true;
+                            }
+                        });
+                        
+                        updateStatus('질문 후보 로드 완료');
+                    } else {
+                        // 질문 후보가 없으면 조용히 무시 (에러 메시지 표시 안 함)
+                        console.log(`[INFO] No question candidate for image ${index}: ${data.error || 'Not found'}`);
+                    }
+                })
+                .catch(error => {
+                    // 에러 발생 시 조용히 무시 (에러 메시지 표시 안 함)
+                    console.log(`[INFO] Failed to load question candidate for image ${index}: ${error.message}`);
+                });
+        }
+        
         // 번역 함수들 (추후 구현)
         function translateQuestion() {
             const questionKo = document.getElementById('questionKo').value.trim();
@@ -1961,8 +2007,8 @@
             button.textContent = '이미지 분석 중...';
             button.disabled = true;
             
-            // 1단계: 이미지 분석 (캐시 확인)
-            fetch(`/api/analyze_image/${currentIndex}`)
+            // 1단계: 이미지 분석 (캐시 확인) - 번역은 OpenAI만 사용
+            fetch(`/api/analyze_image/${currentIndex}?model=openai`)
             .then(response => response.json())
             .then(analysisData => {
                 if (!analysisData.success) {

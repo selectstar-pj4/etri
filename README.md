@@ -4,159 +4,347 @@ MS-COCO 데이터셋 이미지를 사용하여 Visual Question Answering (VQA) �
 
 ## 📋 목차
 
-- [실행 방법](#실행-방법)
-- [필수 요구사항](#필수-요구사항)
+- [시작하기](#시작하기)
+- [VSCode 환경 설정](#vscode-환경-설정)
+- [프로젝트 초기 설정](#프로젝트-초기-설정)
+- [서버 실행 방법](#서버-실행-방법)
+- [작업 방법](#작업-방법)
+- [툴 사용법](#툴-사용법)
 - [프로젝트 구조](#프로젝트-구조)
 - [주요 기능](#주요-기능)
-- [사용법](#사용법)
-- [출력 형식](#출력-형식)
-- [키보드 단축키](#키보드-단축키)
 - [문제 해결](#문제-해결)
 
-## 🚀 실행 방법
+## 🚀 시작하기
 
-### 0. 권장 환경 설정
+### 1. VSCode 설치
 
-```bash
-# (선택) 가상환경 생성
+1. [VSCode 공식 웹사이트](https://code.visualstudio.com/)에서 다운로드
+2. 설치 후 실행
+
+### 2. Python 설치 확인
+
+**Windows:**
+```powershell
+# PowerShell 또는 명령 프롬프트에서 실행
+python --version
+```
+
+**설치되어 있지 않은 경우:**
+1. [Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.8 이상 다운로드
+2. 설치 시 **"Add Python to PATH"** 옵션 체크 필수
+3. 설치 후 터미널 재시작 후 다시 확인
+
+### 3. VSCode Python 확장 설치
+
+1. VSCode 실행
+2. 확장 프로그램 아이콘 클릭 (왼쪽 사이드바) 또는 `Ctrl+Shift+X`
+3. 검색창에 "Python" 입력
+4. Microsoft의 "Python" 확장 프로그램 설치
+5. (선택) "Pylance" 확장 프로그램도 설치 권장
+
+## 🔧 VSCode 환경 설정
+
+### 1. 프로젝트 폴더 열기
+
+1. VSCode 실행
+2. `File` → `Open Folder...` (또는 `Ctrl+K, Ctrl+O`)
+3. 프로젝트 폴더 선택 (`etri` 폴더)
+
+### 2. Python 인터프리터 선택
+
+1. `Ctrl+Shift+P` (명령 팔레트 열기)
+2. "Python: Select Interpreter" 입력
+3. 설치된 Python 버전 선택 (Python 3.8 이상 권장)
+
+### 3. 터미널 열기
+
+- `Ctrl+`` (백틱) 또는 `Terminal` → `New Terminal`
+- 기본 터미널이 PowerShell 또는 Command Prompt로 열립니다
+
+## 📦 프로젝트 초기 설정
+
+### 1. 가상환경 생성 (권장)
+
+프로젝트 폴더에서 터미널을 열고 다음 명령 실행:
+
+```powershell
+# 가상환경 생성
 python -m venv .venv
 
-# 가상환경 활성화
-# Windows (PowerShell)
+# 가상환경 활성화 (PowerShell)
 .venv\Scripts\Activate.ps1
 
-# macOS / Linux
-source .venv/bin/activate
+# 가상환경 활성화 (Command Prompt)
+.venv\Scripts\activate.bat
 ```
 
-가상환경을 사용하면 패키지 버전 충돌을 방지하고 OpenAI SDK를 안전하게 관리할 수 있습니다.
+**활성화 확인:** 터미널 프롬프트 앞에 `(.venv)` 표시가 나타나면 성공
 
-### 1. 필수 패키지 설치
+### 2. 필수 패키지 설치
 
-```bash
-pip install flask pillow pycocotools openai
+가상환경이 활성화된 상태에서:
+
+```powershell
+pip install flask pillow pycocotools openai python-docx
 ```
 
-
-### 2. API 키 설정
-
-`config.py` 파일을 열어 OpenAI API 키를 입력하세요:
-
-```python
-# OpenAI API Key (필수)
-OPENAI_API_KEY = "your-openai-api-key-here"
-
-# 기본 모델 선택: "openai" (현재 OpenAI만 지원)
-DEFAULT_MODEL = "openai"
-
-# 관리자 설정
-ADMIN_NAMES = ["전요한", "홍지우", "박남준"]  # 관리자 이름 목록
-ADMIN_PASSWORD = "admin2025"  # 관리자 비밀번호 (변경 권장)
-
-# Google Drive 설정 (선택사항)
-GOOGLE_DRIVE_FOLDER_ID = "your-folder-id"  # Google Drive 폴더 ID
-GOOGLE_CREDENTIALS_PATH = "credentials.json"  # 서비스 계정 JSON 키 파일 경로
+**설치 확인:**
+```powershell
+pip list
 ```
 
-**참고**: 
-- `config.py`는 `.gitignore`에 포함되어 Git에 업로드되지 않습니다.
-- OpenAI API 키는 필수입니다.
-- Google Drive 연동은 선택사항입니다.
+다음 패키지들이 보여야 합니다:
+- flask
+- pillow
+- pycocotools
+- openai
+- python-docx
 
-### 3. 서버 실행
+### 3. API 키 설정
 
-기본 설정으로 실행:
+1. 프로젝트 루트에 `config.py` 파일 생성 (없는 경우)
+2. 다음 내용 입력:
 
-```bash
+**방법 1: config.txt 사용 (권장)**
+
+1. 프로젝트 루트에 있는 `config.txt` 파일을 열기
+2. `config.txt` 파일을 복사하여 `config.py`로 이름 변경
+3. `OPENAI_API_KEY`에 본인의 API 키 입력
+
+**방법 2: 직접 생성**
+
+1. 프로젝트 루트에 `config.py` 파일 생성
+2. `config.txt` 파일의 내용을 참고하여 작성
+
+**⚠️ 중요:** `config.py`는 Git에 업로드되지 않습니다 (`.gitignore`에 포함됨)
+
+### 4. 필요한 파일 및 폴더 준비
+
+프로젝트를 사용하려면 다음 파일/폴더가 필요합니다:
+
+```
+mscoco/
+├── instances_train2017.json      # COCO 어노테이션 파일 (약 448MB)
+├── filtered_annotations.json     # 필터링된 어노테이션 파일 (약 54MB, 선택사항)
+├── exo_images/                   # Exo 이미지 폴더
+│   └── *.jpg                     # 이미지 파일들
+├── ego_images/                   # Ego 이미지 폴더 (선택사항)
+│   └── *.jpg                     # 이미지 파일들
+└── exo_images_251111/            # 테스트용 이미지 폴더 (선택사항)
+    └── *.jpg                     # 이미지 파일들
+```
+
+**참고:** 이 파일들은 용량이 크거나 Git에 포함되지 않으므로 로컬에서 직접 준비해야 합니다.
+
+## 🖥️ 서버 실행 방법
+
+### 방법 1: 배치 파일 사용 (Windows, 권장)
+
+**테스트 폴더로 실행 (exo_images_251111):**
+
+1. `start_server_251111.bat` 파일 더블클릭
+2. 또는 터미널에서:
+   ```powershell
+   .\start_server_251111.bat
+   ```
+3. 서버가 `http://localhost:5001`에서 실행됩니다
+
+### 방법 2: 명령줄로 직접 실행
+
+**기본 실행:**
+```powershell
 python coco_web_annotator.py --mscoco_folder ./mscoco --coco_json ./mscoco/instances_train2017.json --output_json ./mscoco/web_annotations.json
 ```
 
-> **주의**: `--output_json` 인자는 필수이며, 지정한 파일명을 기준으로 `_exo.json`, `_ego.json` 두 개의 결과 파일이 생성됩니다.
-
-또는 커스텀 설정으로 실행:
-
-```bash
-python coco_web_annotator.py \
-    --mscoco_folder ./mscoco \
-    --coco_json ./mscoco/instances_train2017.json \
-    --output_json ./mscoco/web_annotations.json \
-    --categories_json ./mscoco/categories.json \
-    --host 0.0.0.0 \
-    --port 5000
+**테스트 폴더 지정 (exo_images_251111):**
+```powershell
+python coco_web_annotator.py --mscoco_folder ./mscoco --coco_json ./mscoco/instances_train2017.json --output_json ./mscoco/web_annotations.json --test_folder exo_images_251111 --port 5001
 ```
 
-### 4. 웹 인터페이스 접속
+**커스텀 설정:**
+```powershell
+python coco_web_annotator.py `
+    --mscoco_folder ./mscoco `
+    --coco_json ./mscoco/instances_train2017.json `
+    --output_json ./mscoco/web_annotations.json `
+    --categories_json ./mscoco/categories.json `
+    --host 0.0.0.0 `
+    --port 5001
+```
 
-브라우저에서 다음 주소로 접속:
+### 실행 옵션 설명
 
-- **로컬**: `http://localhost:5000`
-- **원격 서버**: `http://[서버IP]:5000`
+- `--mscoco_folder`: 이미지 폴더가 있는 루트 경로 (기본값: `./mscoco`)
+- `--coco_json`: COCO 어노테이션 JSON 파일 경로 (필수)
+- `--output_json`: 저장할 어노테이션 파일 이름 (필수, 실제로는 `_exo.json`, `_ego.json` 두 파일 생성)
+- `--test_folder`: 특정 폴더의 이미지만 로드 (예: `exo_images_251111`)
+- `--categories_json`: 커스텀 카테고리 매핑 파일 (선택사항)
+- `--host`: 서버 호스트 (기본값: `0.0.0.0`)
+- `--port`: 서버 포트 (기본값: `5000`)
 
-## 📦 필수 요구사항
+### 3. 웹 인터페이스 접속
 
-- Python 3.x
-- 필수 Python 패키지:
-  - `flask`: 웹 서버
-  - `pillow`: 이미지 처리
-  - `pycocotools`: COCO 데이터셋 처리
-  - `openai`: 번역 및 검수 기능 (선택사항)
+서버가 실행되면 브라우저에서 접속:
 
-### 🔧 실행 옵션 요약
+- **로컬**: `http://localhost:5001` (또는 실행한 포트)
+- **원격 서버**: `http://[서버IP]:5001`
 
-`coco_web_annotator.py`는 다음과 같은 CLI 옵션을 제공합니다:
+## 📝 작업 방법
 
-- `--mscoco_folder` (기본값 `./mscoco`): `exo_images`, `ego_images` 폴더가 포함된 루트 경로
-- `--coco_json` (기본값 `/Data/MSCOCO/annotations/instances_train2017.json`): COCO 어노테이션 JSON 경로
-- `--output_json` (**필수**): 저장할 어노테이션 파일 이름 (실제로는 `_exo.json`, `_ego.json` 두 파일 생성)
-- `--categories_json`: `{ "id": <int>, "name": <str> }` 형식의 커스텀 카테고리 매핑 파일
-- `--host`, `--port`: Flask 서버 바인딩 설정 (기본값 `0.0.0.0:5000`)
+### 1. 작업자 로그인
 
-출력 경로의 상위 폴더가 존재하지 않으면 자동으로 생성되며, 템플릿 폴더에 `index.html`이 없을 경우 최초 실행 시 자동 생성합니다.
+1. 웹 인터페이스 접속 시 로그인 화면 표시
+2. **작업자 ID** 입력 (예: `worker001`)
+3. **작업자 이름** 입력 (예: `홍길동`)
+4. "로그인" 버튼 클릭
+
+### 2. 기본 워크플로우
+
+#### Step 1: 이미지 로드
+
+- **Previous/Next 버튼**: 이전/다음 이미지로 이동
+- **Ctrl+Left/Right Arrow**: 키보드로 이동
+- **Image ID 검색**: Image ID 입력 후 "Go" 버튼 클릭
+
+**자동 로드 기능:**
+- 이미지를 로드하면 `question_candidates_exo_251111.json` 파일에서 해당 이미지의 질문과 선택지가 자동으로 로드됩니다
+- 기존 어노테이션이 있으면 그것이 우선 표시됩니다
+
+#### Step 2: 한글 입력 (왼쪽 패널)
+
+1. **Question (한글)** 텍스트 영역
+   - 질문 입력 (예: "테이블 오른쪽에 있는 원형 또는 원통형의 객체")
+   - 질문은 반드시 "~객체"로 끝나야 합니다 ("는?", "는 무엇인가요?" 사용 금지)
+
+2. **Choices (객관식 선지)**
+   - `(a)`: 첫 번째 선택지 입력
+   - `(b)`: 두 번째 선택지 입력
+   - `(c)`: 세 번째 선택지 입력
+   - `(d)`: 네 번째 선택지 입력
+   - 정답 선택: 라디오 버튼 클릭
+
+3. **Rationale (한글)** 텍스트 영역
+   - 정답의 근거 입력 (예: "a는 ATT 조건 불만족, b는 POS 조건 불만족, c는 REL 조건 불만족, d는 모든 조건 만족")
+
+#### Step 3: Bounding Box 선택
+
+1. **기존 bbox 선택**
+   - 이미지에서 빨간색 박스 클릭하여 선택/해제
+   - 선택된 bbox는 파란색으로 표시됩니다
+
+2. **직접 bbox 그리기**
+   - "Draw Bbox" 버튼 클릭
+   - 이미지에서 드래그하여 bbox 그리기
+   - 그린 bbox는 자동으로 선택됩니다
+
+3. **bbox 관리**
+   - `Ctrl+X`: bbox 표시/숨김 토글
+   - `Delete`: 선택된 bbox 삭제
+
+#### Step 4: View 타입 선택
+
+- **Exo** 또는 **Ego** 라디오 버튼 선택
+- 이미지 폴더에 따라 자동 설정됩니다
+
+#### Step 5: 저장
+
+- **Ctrl+S**: 수동 저장
+- **자동 저장**: 30초마다 자동 저장
+- 페이지 종료 시에도 자동 저장
+
+### 3. 번역 기능 사용 (선택사항)
+
+**QA 자동 생성:**
+- 현재는 질문이 미리 생성되어 자동으로 로드됩니다
+- 필요시 수동으로 질문을 수정할 수 있습니다
+
+**수동 번역:**
+- Choices 아래 "번역" 버튼: 질문과 선택지를 영어로 번역
+- Rationale (한글) 아래 "번역" 버튼: 근거를 영어로 번역
+
+## 🛠️ 툴 사용법
+
+### 1. 질문 생성 배치 스크립트
+
+대량의 이미지에 대해 질문을 미리 생성하는 스크립트입니다.
+
+**사용법:**
+
+```powershell
+# 배치 파일 사용 (Windows)
+.\run_question_generation_251111.bat
+
+# 또는 명령줄로 직접 실행
+python generate_exo_questions.py `
+    --model openai `
+    --output mscoco/question_candidates_exo_251111.json `
+    --parallel 5 `
+    --base_url http://localhost:5001
+```
+
+**옵션:**
+- `--model`: 사용할 모델 (기본값: `openai`)
+- `--output`: 출력 JSON 파일 경로
+- `--parallel`: 병렬 처리 개수 (기본값: 3)
+- `--base_url`: 서버 URL (기본값: `http://localhost:5000`)
+- `--start_index`: 시작 인덱스 (기본값: 0)
+- `--end_index`: 종료 인덱스 (기본값: None, 전체)
+- `--skip_existing`: 이미 존재하는 어노테이션 건너뛰기
+- `--annotation_path`: 기존 어노테이션 파일 경로
+
+**주의사항:**
+- 서버가 실행 중이어야 합니다
+- OpenAI API 키가 설정되어 있어야 합니다
+- Rate limit 오류가 발생하면 자동으로 재시도합니다
+
+### 2. 이미지 할당 유틸리티 (명령줄)
+
+명령줄에서 작업자에게 이미지를 할당하는 유틸리티입니다.
+
+**사용법:**
+
+```powershell
+# 여러 작업자에게 이미지 균등 분배
+python assign_images_to_workers.py --workers worker001 worker002 worker003 --range 0 500
+
+# 파일에서 이미지 ID 읽어서 할당
+python assign_images_to_workers.py --workers worker001 worker002 --image_file image_ids.txt
+
+# 직접 이미지 ID 지정
+python assign_images_to_workers.py --workers worker001 --images 579446 579648 580026
+```
+
+**옵션:**
+- `--workers`: 작업자 ID 목록 (필수)
+- `--images`: 이미지 ID 목록
+- `--image_file`: 이미지 ID 목록이 있는 파일 경로
+- `--range`: 이미지 ID 범위 (예: `--range 0 100`)
 
 ## 📁 프로젝트 구조
 
 ```
 etri_annotation_tool/
 ├── coco_web_annotator.py      # Flask 웹 애플리케이션 (메인)
-├── annotation_utils.py         # 어노테이션 유틸리티 스크립트
+├── generate_exo_questions.py  # 질문 생성 배치 스크립트
 ├── worker_management.py      # 작업자 관리 시스템 (API 라우트 포함)
-├── batch_process_with_save.py # 배치 처리 스크립트
 ├── assign_images_to_workers.py # 이미지 할당 유틸리티
-├── config.py                  # 설정 파일 (API 키, 관리자 정보 등)
+├── config.py                  # 설정 파일 (API 키 등)
+├── config.txt                 # config.py 생성용 템플릿 파일
 ├── exo_data_sample.json       # 출력 형식 샘플
 ├── README.md                  # 이 파일
+├── start_server_251111.bat    # 서버 실행 배치 파일 (Windows)
+├── run_question_generation_251111.bat # 질문 생성 배치 파일 (Windows)
 ├── mscoco/
 │   ├── exo_images/            # Exo 이미지 폴더
 │   ├── ego_images/            # Ego 이미지 폴더
+│   ├── exo_images_251111/     # 테스트용 이미지 폴더
 │   ├── instances_train2017.json  # COCO 어노테이션 파일
+│   ├── question_candidates_exo_251111.json # 질문 후보 파일 (자동 생성)
 │   ├── web_annotations_exo.json   # Exo 어노테이션 출력 파일
 │   └── web_annotations_ego.json  # Ego 어노테이션 출력 파일
 └── templates/
     ├── index.html             # 웹 인터페이스 템플릿
-    └── admin.html             # 관리자 페이지 템플릿
 ```
-
-`templates/index.html` 파일은 서버 최초 실행 시 자동으로 생성됩니다. 커스터마이징한 템플릿을 덮어쓰지 않으려면 생성된 파일을 버전 관리하거나 별도로 백업해 두세요.
-
-### ⚠️ 중요: 로컬에 필요한 파일 구성
-
-다음 파일들은 용량이 크거나 Git에 포함되지 않으므로, **로컬 환경에서 직접 구성해야 합니다**:
-
-- `mscoco/instances_train2017.json` - COCO 어노테이션 파일 (약 448MB)
-- `mscoco/filtered_annotations.json` - 필터링된 어노테이션 파일 (약 54MB)
-- `mscoco/exo_images/` - Exo 이미지 폴더
-- `mscoco/ego_images/` - Ego 이미지 폴더
-
-이 파일들은 `.gitignore`에 포함되어 있어 Git 저장소에는 업로드되지 않습니다. 프로젝트를 사용하려면 해당 경로에 위 파일들을 직접 구성해야 합니다.
-
-## 🔑 OpenAI 연동 가이드
-
-- `openai` 패키지를 설치하지 않아도 UI와 수동 작성 기능은 사용 가능하지만, **자동 번역 / 이미지 분석 / 검수** 기능을 사용하려면 OpenAI SDK와 API 키가 필요합니다.
-- API 키 설정 방법:
-  - `config.py.example`를 복사하여 `config.py`로 저장하고 `OPENAI_API_KEY` 값을 입력 (권장)
-  - 또는 운영체제 환경 변수 `OPENAI_API_KEY`를 설정 (`PowerShell` 예: `setx OPENAI_API_KEY "sk-..."`)
-- 키가 없거나 잘못되면 관련 API는 500 에러를 반환하며, 브라우저 알림과 서버 로그에서 오류 메시지가 출력됩니다.
-- 이미지 분석 결과는 메모리 캐시(`image_analysis_cache`)에 저장되어 같은 이미지를 반복 분석하지 않습니다. 서버를 재시작하면 캐시가 초기화됩니다.
 
 ## ✨ 주요 기능
 
@@ -164,80 +352,53 @@ etri_annotation_tool/
 - **왼쪽 패널**: 한글 입력 (Question, Choices, Rationale)
 - **오른쪽 패널**: 영어 출력 및 어노테이션 관리
 
-### 2. 자동 번역 및 QA 생성 기능
-- **GPT-4o 기반 이미지 분석**: 이미지 분석 후 QA 자동 생성
-- **GPT-4o 기반 번역**: 한글 질문과 선택지를 영어로 자동 번역
-- **태그 자동 생성**: `<ATT>`, `<POS>`, `<REL>` 태그 자동 포함
-- **한글 근거 자동 생성**: 선택된 답안을 바탕으로 한글 근거 자동 생성
-- **단일 이미지 QA 생성**: 이미지를 불러와서 질문과 답변을 자동으로 생성
+### 2. 자동 질문 로드
+- 이미지 로드 시 `question_candidates_exo_251111.json`에서 질문과 선택지 자동 로드
+- 기존 어노테이션이 있으면 우선 표시
 
-### 3. Exo/Ego 분리
+### 3. GPT-4o 기반 번역
+- 한글 질문과 선택지를 영어로 자동 번역
+- 태그 자동 생성: `<ATT>`, `<POS>`, `<REL>` 태그 자동 포함
+- 한글 근거를 영어로 자동 번역
+
+### 4. Exo/Ego 분리
 - 이미지를 `exo_images`와 `ego_images` 폴더로 자동 분류
-- 각각 별도의 JSON 파일로 저장 (`web_annotations_exo.json`, `web_annotations_ego.json`)
+- 각각 별도의 JSON 파일로 저장
 
-### 4. Bounding Box 관리
+### 5. Bounding Box 관리
 - 인터랙티브한 bbox 선택/해제
-- **직접 bbox 그리기**: Draw Bbox 모드로 이미지에 직접 bbox 그리기
+- 직접 bbox 그리기 기능
 - 시각적 피드백 제공
-- 단축키로 빠른 토글 (Ctrl+X)
-- Delete 키로 선택된 bbox 삭제
+- 단축키로 빠른 토글
 
-### 5. 자동 저장
+### 6. 자동 저장
 - 30초마다 자동 저장
 - 페이지 종료 시 자동 저장
 - 마지막 작업 이미지 기억
 
-### 6. 작업자 관리 시스템
-- **작업자 로그인**: 작업자 ID와 이름으로 로그인
-- **이미지 할당**: 관리자가 작업자에게 이미지 할당
-- **진행 상황 추적**: 작업 완료 자동 체크 및 진행률 표시
-- **통계 및 리포트**: 작업자별 시간당/일일 작업 통계 생성
-- **Google Drive 연동**: 스프레드시트 자동 업로드 (선택사항)
+### 7. 작업자 관리 시스템
+- 작업자 로그인 및 작업 추적
+- 진행 상황 모니터링
+- 통계 및 리포트 생성
 
-### 7. 관리자 기능
-- **관리자 로그인**: 관리자 이름과 비밀번호로 로그인
-- **관리자 페이지**: 웹 UI에서 모든 작업 관리
-  - 작업자 목록 조회
-  - 이미지 할당 (직접 입력, 범위 지정, 파일 업로드)
-  - 작업 진행 상황 모니터링
-  - 통계 및 리포트 생성
-- **보안**: 작업자에게는 관리자 기능 숨김
+## ⌨️ 키보드 단축키
 
-## 📖 사용법
+### 기본 단축키
+- `Ctrl+S`: 현재 어노테이션 저장
+- `Ctrl+Left Arrow`: 이전 이미지
+- `Ctrl+Right Arrow`: 다음 이미지
 
-### 기본 워크플로우
+### Bbox 관리
+- `Ctrl+X`: Bbox 표시/숨김 토글
+- `Delete`: 선택된 bbox 삭제
 
-1. **한글 입력** (왼쪽 패널)
-   - Question (한글) 텍스트 영역에 질문 입력
-   - Choices (객관식 선지)에 a, b, c, d 선택지 입력
-   - 정답 선택 (라디오 버튼)
-   - Rationale (한글) 텍스트 영역에 근거 입력
+### 객관식 선택
+- `Ctrl+1`: 선택지 (a) 선택
+- `Ctrl+2`: 선택지 (b) 선택
+- `Ctrl+3`: 선택지 (c) 선택
+- `Ctrl+4`: 선택지 (d) 선택
 
-2. **QA 자동 생성 또는 번역 실행**
-   - **QA 자동 생성**: "질문 자동 생성" 버튼 클릭
-     - 이미지 분석 (GPT-4o) → 질문/선택지 자동 생성 → 한글 근거 자동 생성
-   - **수동 번역**: Choices 아래 "번역" 버튼 클릭
-     - 이미지 분석 → 질문/선택지 번역 → 한글 근거 자동 생성
-   - Rationale (한글) 아래 "번역" 버튼 클릭하여 영어 근거 생성
-
-3. **Bounding Box 선택 및 직접 그리기**
-   - 이미지에서 bbox 클릭하여 선택/해제
-   - **Draw Bbox 모드**: "Draw Bbox" 버튼 클릭 후 이미지에서 드래그하여 직접 bbox 그리기
-   - Ctrl+X로 bbox 표시/숨김 토글
-   - Delete 키로 선택된 bbox 삭제
-
-4. **View 타입 선택**
-   - Exo 또는 Ego 라디오 버튼 선택 (이미지 폴더에 따라 자동 설정)
-
-5. **저장**
-   - Ctrl+S 또는 "Save" 버튼 클릭
-   - 자동 저장도 활성화됨
-
-### 이미지 탐색
-
-- **Previous/Next 버튼**: 이전/다음 이미지로 이동
-- **Ctrl+Left/Right Arrow**: 키보드로 이동
-- **Image ID 검색**: Image ID 입력 후 "Go" 버튼 클릭
+**참고**: textarea나 input에 포커스가 있을 때는 단축키가 작동하지 않습니다.
 
 ## 📄 출력 형식
 
@@ -269,24 +430,6 @@ etri_annotation_tool/
 - `bbox`: 선택된 bounding box 좌표 `[x, y, width, height]` (단일 bbox) 또는 `[[x1, y1, w1, h1], [x2, y2, w2, h2]]` (다중 bbox)
 - `view`: 뷰 타입 ("exo" 또는 "ego")
 
-## ⌨️ 키보드 단축키
-
-### 기본 단축키
-- `Ctrl+S`: 현재 어노테이션 저장
-- `Ctrl+Left Arrow`: 이전 이미지
-- `Ctrl+Right Arrow`: 다음 이미지
-
-### Bbox 관리
-- `Ctrl+X`: Bbox 표시/숨김 토글
-
-### 객관식 선택
-- `Ctrl+1`: 선택지 (a) 선택
-- `Ctrl+2`: 선택지 (b) 선택
-- `Ctrl+3`: 선택지 (c) 선택
-- `Ctrl+4`: 선택지 (d) 선택
-
-**참고**: textarea나 input에 포커스가 있을 때는 단축키가 작동하지 않습니다.
-
 ## 🔧 문제 해결
 
 ### 1. "COCO JSON file not found" 오류
@@ -294,7 +437,7 @@ etri_annotation_tool/
 **원인**: COCO 어노테이션 파일 경로가 잘못되었습니다.
 
 **해결**:
-```bash
+```powershell
 # 올바른 경로로 실행
 python coco_web_annotator.py --coco_json ./mscoco/instances_train2017.json ...
 ```
@@ -309,10 +452,10 @@ python coco_web_annotator.py --coco_json ./mscoco/instances_train2017.json ...
 
 ### 3. 포트가 이미 사용 중
 
-**원인**: 포트 5000이 이미 사용 중입니다.
+**원인**: 포트가 이미 사용 중입니다.
 
 **해결**:
-```bash
+```powershell
 # 다른 포트 사용
 python coco_web_annotator.py ... --port 5001
 ```
@@ -322,7 +465,7 @@ python coco_web_annotator.py ... --port 5001
 **원인**: OpenAI API 키가 설정되지 않았거나 잘못되었습니다.
 
 **해결**:
-- `coco_web_annotator.py` 파일의 `OPENAI_API_KEY` 변수 확인
+- `config.py` 파일의 `OPENAI_API_KEY` 확인
 - API 키가 유효한지 확인
 - `openai` 패키지가 설치되었는지 확인: `pip install openai`
 
@@ -334,115 +477,39 @@ python coco_web_annotator.py ... --port 5001
 - `mscoco/exo_images` 및 `mscoco/ego_images` 폴더에 이미지 파일이 있는지 확인
 - 브라우저 콘솔(F12)에서 에러 메시지 확인
 
-## 🛠️ 유틸리티 스크립트
+### 6. Rate Limit 오류
 
-`annotation_utils.py`는 어노테이션 파일 관리 유틸리티를 제공합니다. 각 명령은 실행 전 대상 JSON을 자동으로 백업(`.backup`, `.backup2`)하므로, 문제가 생기면 백업 파일로 복원할 수 있습니다.
+**원인**: OpenAI API 사용량 제한 초과.
 
-```bash
-# image_resolution 필드 추가
-python annotation_utils.py add_resolution \
-    --annotation_file ./mscoco/web_annotations_exo.json \
-    --coco_json ./mscoco/instances_train2017.json
+**해결**:
+- 스크립트가 자동으로 재시도합니다 (최대 5회)
+- `--parallel` 옵션 값을 줄여서 실행 (예: `--parallel 3`)
+- 잠시 기다린 후 다시 시도
 
-# bbox 형식 수정
-python annotation_utils.py fix_bbox \
-    --annotation_file ./mscoco/web_annotations_exo.json
+### 7. 가상환경 활성화 오류 (PowerShell)
 
-# 이미지 정리 (exo/ego 폴더로 분리)
-python annotation_utils.py organize_images \
-    --exo_json ./mscoco/web_annotations_exo.json \
-    --ego_json ./mscoco/web_annotations_ego.json \
-    --mscoco_folder ./mscoco
+**원인**: PowerShell 실행 정책 문제.
+
+**해결**:
+```powershell
+# PowerShell 실행 정책 변경 (현재 사용자만)
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-## 🌐 내부 API 엔드포인트 요약
-
-프론트엔드와 외부 스크립트에서 활용 가능한 주요 REST API는 다음과 같습니다:
-
-- `GET /api/image/<index>`: 인덱스에 해당하는 이미지 정보와 기존 어노테이션 반환
-- `GET /api/analyze_image/<index>`: OpenAI 비전 모델을 이용한 이미지 분석 (캐시 적용)
-- `POST /api/translate/question`, `/api/translate/choices`, `/api/translate/question_and_choices`: 한글 질문·선택지를 영어 포맷으로 변환
-- `POST /api/translate/rationale`: 한글 근거를 영어 소거법 형식으로 변환
-- `POST /api/review_translation`: 번역문 문법 검수 및 수정 제안
-- `POST /api/save`: bbox와 번역 결과를 저장 (작업자 ID 포함)
-- `GET /api/find/<image_id>`: COCO `image_id`로 데이터셋 인덱스 조회
-- `POST /api/admin/login`: 관리자 로그인 인증
-- `GET /api/workers`: 작업자 목록 조회
-- `POST /api/workers`: 작업자 추가
-- `POST /api/workers/<worker_id>/assign`: 작업자에게 이미지 할당
-- `GET /api/workers/<worker_id>/progress`: 작업자 진행 상황 조회
-- `GET /api/workers/<worker_id>/stats`: 작업자 통계 조회
-- `GET /api/workers/export`: 통계 스프레드시트 내보내기
-
-번역·분석 관련 엔드포인트는 OpenAI API 키가 설정되지 않으면 500 에러를 반환하므로, 자동화 시 예외 처리가 필요합니다.
-
-## 👥 작업자 관리 시스템
-
-### 작업자 로그인
-1. 웹 인터페이스 접속 시 로그인 화면 표시
-2. 작업자 ID와 이름 입력
-3. 로그인 후 작업 시작 (자동으로 작업 완료 추적)
-
-### 관리자 로그인
-1. 로그인 화면에서 "관리자" 탭 클릭
-2. 관리자 이름 입력 (전요한, 홍지우, 박남준)
-3. 비밀번호 입력 (`config.py`에서 설정)
-4. 관리자 페이지로 자동 이동
-
-### 관리자 페이지 기능
-- **작업자 목록**: 등록된 모든 작업자 확인
-- **이미지 할당**: 
-  - 직접 입력: 쉼표로 구분된 이미지 ID
-  - 범위 지정: 시작 ID ~ 끝 ID
-  - 파일 업로드: 텍스트 파일에서 이미지 ID 읽기
-- **진행 상황 모니터링**: 실시간 작업 진행률 확인
-- **통계 및 리포트**: 
-  - 일일 요약 리포트
-  - 상세 통계 (시간당 작업량)
-  - Google Drive 자동 업로드 (설정 시)
-
-### Google Drive 연동 설정
-`config.py`에 다음 설정 추가:
-```python
-GOOGLE_DRIVE_FOLDER_ID = "your-folder-id"
-GOOGLE_CREDENTIALS_PATH = "credentials.json"
+또는 Command Prompt 사용:
+```cmd
+.venv\Scripts\activate.bat
 ```
-
-Google Drive API 설정 방법:
-1. Google Cloud Console에서 서비스 계정 생성
-2. JSON 키 파일 다운로드
-3. `credentials.json`으로 저장
-4. Google Drive 폴더 ID 설정
-
-## 🔄 배치 처리
-
-대량 이미지에 대한 QA 자동 생성이 가능합니다:
-
-```bash
-# 배치 처리 스크립트 실행
-python batch_process_with_save.py \
-    --start_index 0 \
-    --end_index 100 \
-    --parallel 3 \
-    --output_json ./mscoco/web_annotations.json
-```
-
-옵션:
-- `--start_index`: 시작 인덱스
-- `--end_index`: 끝 인덱스
-- `--parallel`: 병렬 처리 수 (기본값: 3)
-- `--output_json`: 출력 JSON 파일 경로
 
 ## 📝 참고사항
 
 - 어노테이션은 자동으로 저장되며, 페이지를 새로고침해도 마지막 작업 이미지로 돌아갑니다
 - Exo 이미지는 `web_annotations_exo.json`에, Ego 이미지는 `web_annotations_ego.json`에 저장됩니다
 - 같은 `image_id`가 이미 존재하면 덮어쓰기됩니다 (중복 방지)
-- 번역 기능은 GPT-4o-mini를 사용하며, 이미지 분석을 통해 더 정확한 번역을 제공합니다
+- 번역 기능은 GPT-4o를 사용하며, 이미지 분석을 통해 더 정확한 번역을 제공합니다
 - 작업자 관리 시스템은 `worker_management.py`를 통해 동작하며, 작업자 정보는 `workers.json`에 저장됩니다
-- 관리자 비밀번호는 `config.py`의 `ADMIN_PASSWORD`에서 변경할 수 있습니다
+- `question_candidates_exo_251111.json` 파일은 질문 생성 스크립트로 미리 생성해야 합니다
 
 ## 📄 라이선스
 
 이 프로젝트는 ETRI에서 개발되었습니다.
-

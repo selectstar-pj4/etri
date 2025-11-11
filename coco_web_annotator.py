@@ -15,10 +15,13 @@ from PIL import Image
 from pycocotools.coco import COCO
 try:
     from openai import OpenAI
+    from openai import RateLimitError
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
 
+# Gemini support removed - using OpenAI only
+GEMINI_AVAILABLE = False
 
 import re
 
@@ -36,22 +39,15 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # API Keys (config.py에서 로드, 없으면 환경변수 또는 기본값 사용)
 try:
-    from config import (
-        OPENAI_API_KEY,
-        DEFAULT_MODEL,
-        ADMIN_NAMES,
-        ADMIN_PASSWORD
-    )
+    from config import OPENAI_API_KEY, DEFAULT_MODEL, ADMIN_NAMES, ADMIN_PASSWORD
 except ImportError:
     import os
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'openai')
     ADMIN_NAMES = os.getenv('ADMIN_NAMES', '전요한,홍지우,박남준').split(',')
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin2024')
-
-# 경고 메시지 출력
-if not OPENAI_API_KEY:
-    print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
+    if not OPENAI_API_KEY:
+        print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
 
 class COCOWebAnnotator:
     """Web-based COCO annotation tool for creating question-response pairs."""
@@ -88,26 +84,48 @@ class COCOWebAnnotator:
         ego_image_ids = []
         unknown_image_ids = []
         
-        for image_id in all_image_ids:
-            image_info = self.coco.imgs[image_id]
-            file_name = image_info.get('file_name', '')
+        # test_folder가 지정되면 해당 폴더에 있는 이미지만 처리
+        if test_folder:
+            # test_folder에 있는 실제 파일 목록 가져오기
+            test_folder_files = set()
+            if os.path.exists(self.exo_images_folder):
+                test_folder_files = set(os.listdir(self.exo_images_folder))
             
-            # exo_images 폴더에 있는지 확인
-            exo_path = os.path.join(self.exo_images_folder, file_name)
-            ego_path = os.path.join(self.ego_images_folder, file_name)
-            
-            if os.path.exists(exo_path):
-                exo_image_ids.append(image_id)
-            elif os.path.exists(ego_path):
-                ego_image_ids.append(image_id)
-            else:
-                # 둘 다 없으면 기본값으로 exo에 추가 (또는 unknown에 추가)
-                unknown_image_ids.append(image_id)
+            for image_id in all_image_ids:
+                image_info = self.coco.imgs[image_id]
+                file_name = image_info.get('file_name', '')
+                
+                # test_folder에 있는 파일만 포함
+                if file_name in test_folder_files:
+                    exo_path = os.path.join(self.exo_images_folder, file_name)
+                    if os.path.exists(exo_path):
+                        exo_image_ids.append(image_id)
+        else:
+            # test_folder가 없으면 전체 이미지 순회
+            for image_id in all_image_ids:
+                image_info = self.coco.imgs[image_id]
+                file_name = image_info.get('file_name', '')
+                
+                # exo_images 폴더에 있는지 확인
+                exo_path = os.path.join(self.exo_images_folder, file_name)
+                ego_path = os.path.join(self.ego_images_folder, file_name)
+                
+                if os.path.exists(exo_path):
+                    exo_image_ids.append(image_id)
+                elif os.path.exists(ego_path):
+                    ego_image_ids.append(image_id)
+                else:
+                    # 둘 다 없으면 기본값으로 exo에 추가 (또는 unknown에 추가)
+                    unknown_image_ids.append(image_id)
         
-        # exo 먼저, 그 다음 ego, 마지막에 unknown
-        self.image_ids = exo_image_ids + ego_image_ids + unknown_image_ids
-        
-        print(f"[INFO] Image order: {len(exo_image_ids)} exo images, {len(ego_image_ids)} ego images, {len(unknown_image_ids)} unknown images")
+        # test_folder가 지정되면 exo만, 아니면 exo + ego + unknown
+        if test_folder:
+            self.image_ids = exo_image_ids
+            print(f"[INFO] Test folder mode: {len(exo_image_ids)} images from {test_folder}")
+        else:
+            # exo 먼저, 그 다음 ego, 마지막에 unknown
+            self.image_ids = exo_image_ids + ego_image_ids + unknown_image_ids
+            print(f"[INFO] Image order: {len(exo_image_ids)} exo images, {len(ego_image_ids)} ego images, {len(unknown_image_ids)} unknown images")
 
         # --- 추가: category id -> name 매핑 로드 ---
         self.category_id_to_name = {}
@@ -289,6 +307,74 @@ def admin_check():
     # 실제로는 세션 또는 토큰 기반 인증이 필요하지만,
     # 현재는 프론트엔드의 localStorage를 신뢰
     return jsonify({'success': True, 'message': 'Admin check endpoint'})
+
+@app.route('/api/exo_image_indices', methods=['GET'])
+def get_exo_image_indices():
+    """Get list of all exo image indices (for batch processing) - 빠른 버전"""
+    try:
+        exo_indices = []
+        for idx, image_id in enumerate(annotator.image_ids):
+            image_info = annotator.coco.imgs[image_id]
+            file_name = image_info.get('file_name', '')
+            exo_path = os.path.join(annotator.exo_images_folder, file_name)
+            if os.path.exists(exo_path):
+                exo_indices.append(idx)
+        
+        return jsonify({
+            'success': True,
+            'exo_indices': exo_indices,
+            'total': len(exo_indices)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/question_candidate/<int:index>', methods=['GET'])
+def get_question_candidate(index):
+    """Get pre-generated question candidate for an image from JSON file."""
+    if index >= len(annotator.image_ids):
+        return jsonify({'error': 'Invalid index'}), 400
+    
+    image_id = annotator.image_ids[index]
+    
+    # 질문 후보 JSON 파일 경로
+    question_candidates_path = os.path.join(annotator.mscoco_folder, 'question_candidates_exo_251111.json')
+    
+    if not os.path.exists(question_candidates_path):
+        return jsonify({
+            'success': False,
+            'error': 'Question candidates file not found',
+            'file_path': question_candidates_path
+        }), 404
+    
+    try:
+        with open(question_candidates_path, 'r', encoding='utf-8') as f:
+            question_candidates = json.load(f)
+        
+        # image_id로 질문 후보 찾기
+        image_id_str = str(image_id)
+        if image_id_str not in question_candidates:
+            return jsonify({
+                'success': False,
+                'error': f'Question candidate not found for image_id: {image_id}'
+            }), 404
+        
+        candidate = question_candidates[image_id_str]
+        
+        return jsonify({
+            'success': True,
+            'image_id': image_id,
+            'question': candidate.get('question', ''),
+            'choices': candidate.get('choices', {}),
+            'correct_answer': candidate.get('correct_answer', 'a')
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to load question candidate: {str(e)}'
+        }), 500
 
 @app.route('/api/image/<int:index>')
 def get_image(index):
@@ -573,6 +659,8 @@ Return only the formatted <choice> tag with translations."""
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# Gemini functions removed - using OpenAI only
+
 def analyze_image_with_model(image_base64, model='openai', image_path=None):
     """이미지 분석을 모델별로 수행하는 헬퍼 함수"""
     analysis_prompt = """Analyze this image in detail and extract specific visual features. Focus on:
@@ -625,7 +713,7 @@ Provide a comprehensive but concise description that captures these detailed vis
         return response.choices[0].message.content.strip()
     
     else:
-        raise Exception(f'Unknown model: {model}. Only "openai" or "gpt" is supported.')
+        raise Exception(f'Unknown model: {model}. Supported models: "openai", "gpt"')
 
 @app.route('/api/analyze_image/<int:index>', methods=['GET'])
 def analyze_image(index):
@@ -716,7 +804,8 @@ def generate_question_and_choices():
     data = request.json
     image_id = data.get('image_id', None)
     index = data.get('index', None)
-    model = data.get('model', DEFAULT_MODEL).lower()  # 모델 선택 파라미터 추가
+    # 기본값은 DEFAULT_MODEL 사용
+    model = data.get('model', DEFAULT_MODEL).lower()
     
     if image_id is None and index is None:
         return jsonify({'success': False, 'error': 'image_id or index is required'}), 400
@@ -730,6 +819,7 @@ def generate_question_and_choices():
         
         # 1단계: 이미지 분석 (선택한 모델 사용) - 캐시 확인 또는 실행
         image_analysis = ""
+        image_path = None  # image_path 초기화
         cache_key = f"{image_id}_{model}"
         if cache_key in image_analysis_cache:
             image_analysis = image_analysis_cache[cache_key]
@@ -807,7 +897,7 @@ def generate_question_and_choices():
         # 주요 객체 목록 생성
         main_objects = list(set([cat['category_name'] for cat in category_info if cat['category_name'] != 'unknown']))[:10]
         
-        # 3단계: 질문 생성 (GPT-4o 사용)
+        # 3단계: 질문 생성 (OpenAI만 사용)
         if not OPENAI_AVAILABLE:
             return jsonify({'success': False, 'error': 'OpenAI library not installed. Install with: pip install openai'}), 500
         
@@ -815,236 +905,366 @@ def generate_question_and_choices():
             return jsonify({'success': False, 'error': 'OPENAI_API_KEY is not set. Please set it in config.py'}), 500
         
         client = OpenAI(api_key=OPENAI_API_KEY)
+        
         # 3-hop 질문 생성: ATT, POS, REL이 모두 포함된 복잡한 질문
-        question_generation_prompt = f"""이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 3-hop 질문을 한글로 생성해주세요.
+        question_generation_prompt = f"""이미지와 이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 3-hop 질문을 한글로 생성해주세요.
 
-이미지 분석 결과:
+🚨 **절대 필수 규칙 - 반드시 준수해야 함**:
+
+**STEP 1: 이미지 내용 직접 확인 및 ATT 속성 검증 (절대 필수)**
+
+먼저 이미지를 직접 확인하고, 질문에 사용할 ATT 속성이 실제 이미지의 객체와 정확히 일치하는지 검증하세요.
+
+🚨 **CRITICAL - ATT 속성 정확성 검증 (절대 필수)**:
+1. 질문에서 사용할 ATT 속성(예: "빨간색 객체", "원형 또는 원통형 객체", "식용 가능한 물체")을 먼저 결정하세요.
+2. 이미지를 직접 확인하여 해당 ATT 속성을 만족하는 객체들이 실제로 존재하는지 확인하세요.
+3. 예를 들어, "흰색 객체"라고 질문하려면 이미지에 실제로 흰색 객체가 있어야 합니다.
+4. 예를 들어, "정사각형 또는 직사각형 객체"라고 질문하려면 이미지에 실제로 정사각형 또는 직사각형 객체가 있어야 합니다.
+5. 이미지에 존재하지 않는 속성을 ATT로 사용하는 것은 절대 금지입니다.
+
+**검증 체크리스트**:
+- [ ] 질문에서 사용할 ATT 속성이 실제 이미지의 객체와 정확히 일치하는가?
+- [ ] ATT 속성을 만족하는 객체가 이미지에 실제로 존재하는가?
+- [ ] 이미지에 존재하지 않는 속성을 ATT로 사용하지 않았는가?
+
+**STEP 2: 복잡하고 고급 추론이 필요한 3-hop 질문 구조 생성**
+
+🚨 **CRITICAL - 질문 복잡도 및 고급 추론 요구사항 (절대 필수)**:
+
+각 질문은 반드시 ATT(속성), POS(위치), REL(관계) 세 가지 요소를 모두 포함해야 하며, **단순한 질문은 절대 금지**입니다.
+
+**❌ 절대 금지 - 너무 단순한 질문 패턴**:
+- "X 오른쪽에 있는 가장 가까운 Y 객체" (단순 위치+속성 조합)
+- "X 위에 있는 가장 가까운 Y 객체" (단순 위치+속성 조합)
+- "X 왼쪽에 있는 가장 먼 Y 객체" (단순 위치+속성 조합)
+
+**✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문 패턴**:
+
+1. **중첩된 조건 조합**:
+   - "X <POS>위에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z로부터 <REL>가장 먼</REL> 객체"
+   - "X <POS>왼쪽에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>앞에 있는</POS> <REL>가장 가까운</REL> 객체"
+   - "<ATT>Y 객체</ATT> 중에서 X <POS>위에 있는</POS> Z로부터 <REL>가장 먼</REL> 객체"
+
+2. **복잡한 기준점과 대상의 조합**:
+   - "X <POS>위에 있는</POS> <ATT>Y 객체</ATT>로부터 <REL>가장 먼</REL> <ATT>Z 객체</ATT>"
+   - "X <POS>앞에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>옆에 있는</POS> <REL>가장 가까운</REL> 객체"
+
+3. **여러 조건이 동시에 적용되는 질문**:
+   - "<ATT>Y 객체</ATT> 중에서 X <POS>위에</POS> <REL>놓여 있는</REL> Z <POS>앞에 있는</POS> 객체"
+   - "<ATT>Y 객체</ATT> 중에서 X <POS>옆에 있는</POS> <REL>가장 높은</REL> 객체"
+
+4. **복잡한 공간 관계**:
+   - "X <POS>앞에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>반대편에 있는</POS> <REL>가장 먼</REL> 객체"
+   - "X <POS>중앙에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>옆에 있는</POS> <REL>가장 가까운</REL> 객체"
+
+**ATT (속성/대상) 규칙 - CRITICAL: 속성 기반 표현만 사용, 구체적 명사 금지**:
+- ❌ **절대 사용 금지 - 구체적 명사**: "컵", "접시", "의자", "테이블" 등
+- ✅ **반드시 사용 - 속성 기반 표현**:
+  * "원형 또는 원통형 객체" (컵, 병 등)
+  * "밝은 색상의 객체" (밝은 색의 물체들)
+  * "파티용품 객체" (파티 관련 물체들)
+  * "식용 가능한 물체" (먹을 수 있는 것들)
+  * "정사각형 또는 직사각형 객체" (사각형 모양)
+  * "빨간색 객체", "흰색 색상의 객체" (색상 기반)
+  * "나무 재질의 객체" (재질 기반)
+
+**POS (위치) 규칙**:
+- ❌ 절대 사용 금지: "이미지 중앙에", "이미지 왼쪽에" (모호함)
+- ✅ 반드시 사용: "테이블 중앙에", "소파 왼쪽에", "싱크대 오른쪽에" (구체적 객체 기준)
+- **위치 반전 규칙**: 실제로 "왼쪽"에 있으면 질문에서는 "오른쪽"으로 표현
+
+**REL (관계) 규칙**:
+- "가장 가까운", "가장 먼", "두 번째로 가까운" 등
+
+**🚨 CRITICAL - 질문 끝 표현 규칙 (절대 필수)**:
+질문은 반드시 "~객체"로 끝나야 합니다. "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요.
+
+- ❌ **절대 사용 금지**:
+  * "~사람은 누구인가요?" (사람을 묻는 형식 금지)
+  * "것은 무엇인가요?" (모호한 표현 금지)
+  * "가장 가까운 것은?" (ATT 속성 미명시)
+  * "가장 먼 것은?" (ATT 속성 미명시)
+  * "~객체는?" ("는?" 사용 금지)
+  * "~객체는 무엇인가요?" ("는 무엇인가요?" 사용 금지)
+  * "무엇인가요?" (ATT 속성이 명시되지 않은 형식 금지)
+
+- ✅ **반드시 사용 - "~객체"로 끝나는 형식**:
+  * "정사각형 또는 직사각형의 객체"
+  * "원통형 또는 원형의 객체"
+  * "밝은 색상의 객체"
+  * "무채색 객체"
+  * "금속 재질의 객체"
+  * "식용 가능한 객체"
+  * "빨간색 객체"
+  * "나무 재질의 객체"
+
+**질문 형식 예시**:
+- ✅ 올바른 예시: "테이블 위에 있는 가장 가까운 원형 또는 원통형의 객체"
+- ✅ 올바른 예시: "소파 왼쪽에 위치한 밝은 색상의 객체"
+- ✅ 올바른 예시: "싱크대 오른쪽에 있는 무채색 객체"
+- ✅ 올바른 예시: "식용 가능한 객체 중에서 포크로부터 가장 먼 객체"
+- ❌ 잘못된 예시: "소파 왼쪽에 있는 사람은 누구인가요?" (사람을 묻는 형식, "는?" 사용)
+- ❌ 잘못된 예시: "테이블 위에 있는 것은 무엇인가요?" (ATT 속성 미명시, "는 무엇인가요?" 사용)
+- ❌ 잘못된 예시: "가장 가까운 것은?" (ATT 속성 미명시, "는?" 사용)
+- ❌ 잘못된 예시: "가장 가까운 객체는?" ("는?" 사용 금지)
+- ❌ 잘못된 예시: "가장 가까운 객체는 무엇인가요?" ("는 무엇인가요?" 사용 금지)
+
+**중요**: 질문은 반드시 ATT 속성을 포함한 "~객체"로 끝나야 하며, "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요. 질문은 "~객체"로 끝나는 명사구 형태여야 합니다.
+
+**STEP 3: 소거법을 위한 선택지 설계 및 검증 (고급 추론 능력 요구)**
+
+🚨 **CRITICAL - 고급 추론 능력 요구를 위한 선택지 구성 (절대 필수)**:
+- 질문의 ATT 조건을 만족하는 객체가 선택지에 **최소 2개 이상** 있어야 합니다.
+- 이렇게 해야 다른 AI가 문제를 풀 때 단순히 ATT 조건을 만족하는지 확인하는 것만으로는 정답을 찾을 수 없고, 추가적인 추론(위치, 거리 등)이 필요합니다.
+
+**예시 1 - 올바른 구성 (고급 추론 요구)**:
+질문: "식용 가능한 물체 중에서..."
+선택지:
+- a: 케이크 조각 (ATT 조건 만족, 하지만 다른 조건 불만족)
+- b: 케이크 조각 (ATT 조건 만족, 하지만 다른 조건 불만족) ← 다른 케이크 조각
+- c: 피자 (ATT 조건 만족, 하지만 다른 조건 불만족)
+- d: 햄버거 (정답: ATT 조건 만족 + 다른 모든 조건 만족)
+
+이 경우 ATT 조건을 만족하는 객체가 4개(a, b, c, d 모두)이므로 고급 추론이 필요합니다.
+
+**예시 2 - 잘못된 구성 (너무 쉬움)**:
+질문: "식용 가능한 물체 중에서..."
+선택지:
+- a: 컵 (ATT 조건 불만족 - 식용 불가)
+- b: 접시 (ATT 조건 불만족 - 식용 불가)
+- c: 포크 (ATT 조건 불만족 - 식용 불가)
+- d: 케이크 조각 (정답: ATT 조건 만족)
+
+이 경우 ATT 조건을 만족하는 객체가 1개(d만)이므로 너무 쉽습니다. ❌
+
+**검증 체크리스트**:
+- [ ] 질문의 ATT 조건을 만족하는 객체가 선택지에 최소 2개 이상 있는가? (고급 추론 능력 요구)
+- [ ] 각 선택지는 서로 다른 이유로 제외될 수 있는가?
+- [ ] 선택지에 동일한 물체가 중복되지 않았는가?
+- [ ] 선택지의 모든 객체가 이미지에 실제로 존재하는가?
+
+**STEP 4: 동일 물체 중복 금지**
+
+🚨 **CRITICAL - 동일 물체 중복 금지 (절대 필수)**:
+- 각 선택지는 반드시 **서로 다른 객체 인스턴스**를 가리켜야 합니다.
+- 같은 카테고리의 객체라도, 이미지 내에서 다른 인스턴스(다른 bbox)를 가리켜야 합니다.
+- 예: 이미지에 "컵"이 3개 있어도, 선택지에 "컵"이 2번 나오면 안 됩니다. 각각 "왼쪽 컵", "오른쪽 컵", "중앙 컵" 등으로 구분해야 합니다.
+
+**이미지 분석 결과**:
 {image_analysis}
 
-COCO 객체 정보 (bbox로 식별 가능한 객체들):
+**COCO 객체 정보 (bbox로 식별 가능한 객체들)**:
 - 주요 객체: {', '.join(main_objects) if main_objects else '없음'}
 - 총 객체 수: {len(category_info)}
 - 각 객체는 이미지 내 bbox로 정확히 식별 가능함
 
 **중요**: 이미지 분석 결과에서 언급된 객체들 중에서, COCO 어노테이션에 존재하는 객체만 선택지로 사용하세요. 같은 종류의 객체가 여러 개 있으면 색상, 위치, 속성 등으로 명확히 구분하세요.
 
-CRITICAL REQUIREMENTS - 3-HOP QUESTIONS:
+**🚨 CRITICAL - 참고 예시 (exo_data_sample.json, web_annotations_exo.json 스타일)**:
 
-1. **반드시 3-hop 질문 생성**: 각 질문은 ATT(속성), POS(위치), REL(관계) 세 가지 요소를 모두 포함해야 합니다.
+다음 예시들을 반드시 참고하여 **복잡하고 고급 추론이 필요한** 질문과 선택지를 생성하세요:
 
-2. **ATT (속성/대상) 예시 - CRITICAL: 객관적이고 구체적인 표현만 사용**:
-   - ❌ 절대 사용 금지 - 추상적이고 주관적인 표현:
-     * "작은 컵", "중간 크기의 테이블", "큰 소파" (크기는 주관적)
-     * "예쁜 꽃병", "멋진 의자", "좋은 책" (미적 판단은 주관적)
-     * "보통 크기", "적당한 크기", "작은 크기" (모호함)
-   
-   - ✅ 반드시 사용 - 객관적이고 구체적인 속성:
-     * 색상: "빨간색 물체", "파란색 컵", "흰색 의자", "검은색 테이블"
-     * 모양: "정사각형 또는 직사각형 객체", "원형 또는 원통형 물체", "둥근 접시"
-     * 재질: "나무 테이블", "유리 컵", "금속 포크", "플라스틱 그릇"
-     * 기능/용도: "식용 가능한 물체", "식탁용품", "주방용품", "의자", "책"
-     * 위치 구분: "왼쪽 컵", "오른쪽 의자", "중앙 테이블" (구체적 위치 기준)
-     * 패턴/디자인: "줄무늬 셔츠", "체크 무늬 타올", "단색 의자"
-   
-   - **중요**: 크기, 미적 판단 등 주관적인 표현을 절대 사용하지 말고, 색상, 모양, 재질, 기능, 위치 등 객관적으로 확인 가능한 속성만 사용하세요.
+**예시 1** (exo_data_sample.json - 복잡한 조건 조합):
+- 질문: "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table?"
+- 선택지: (a) glass, (b) potato fries, (c) hamburger, (d) cell phone
+- 근거: cell phone은 식용 불가 (ATT 조건 불만족), glass도 식용 불가 (ATT 조건 불만족), potato fries는 hamburger보다 가까움 (REL 조건 불만족), 따라서 hamburger가 정답
+- ✅ **복잡도**: ATT 조건 + POS 조건 + REL 조건이 모두 적용됨
+- ✅ **고급 추론**: ATT 조건을 만족하는 객체가 2개(b, c) 있어서 단순히 ATT만 확인해서는 안 됨
 
-3. **POS (위치) 예시 - CRITICAL: 구체적인 객체 기준으로 위치 설명 + 위치 반전 규칙**:
-   - ❌ 잘못된 예시: "이미지 중앙에", "이미지 왼쪽에" (모호함 - 중앙의 기준이 불명확)
-   - ✅ 올바른 예시: "테이블 중앙에", "소파 왼쪽에", "싱크대 오른쪽에"
-   - ✅ 올바른 예시: "카운터 중앙에", "창문 근처에", "냉장고 왼쪽에"
-   - ✅ 올바른 예시: "테이블 오른쪽 사이드에", "소파 왼쪽 사이드에", "식탁 중앙에"
-   - **중요**: "이미지 중앙", "이미지 왼쪽" 같은 모호한 표현을 사용하지 말고, 반드시 구체적인 객체(테이블, 소파, 싱크대, 카운터 등)를 기준으로 위치를 설명하세요.
-   - **CRITICAL - 위치 반전 규칙**: 질문 생성 시 위치 표현을 반대로 변환하세요:
-     * 실제로 "왼쪽"에 있는 경우 → 질문에서는 "오른쪽"으로 표현
-     * 실제로 "오른쪽"에 있는 경우 → 질문에서는 "왼쪽"으로 표현
-     * 예시: 실제로 "소파 왼쪽에" 있는 경우 → 질문에서는 "소파 오른쪽에"로 표현
-     * 예시: 실제로 "테이블 오른쪽에" 있는 경우 → 질문에서는 "테이블 왼쪽에"로 표현
+**예시 2** (exo_data_sample.json - 중첩된 공간 관계):
+- 질문: "Which <ATT>round and cylindrical object</ATT> is <REL>farthest</REL> from the person sitting <POS>on the right side of</POS> the dining table?"
+- 선택지: (a) plate, (b) white cake, (c) rightmost coke, (d) vase
+- 근거: plate, white cake, rightmost coke는 모두 가까운 편이지만, vase는 테이블 반대편에 위치하여 가장 멀리 떨어져 있음
+- ✅ **복잡도**: ATT 조건 + POS 조건(사람의 위치) + REL 조건이 모두 적용됨
+- ✅ **고급 추론**: ATT 조건을 만족하는 객체가 4개(a, b, c, d 모두) 있어서 거리 계산이 필요함
 
-4. **REL (관계) 예시**:
-   - "가장 가까운", "가장 먼", "두 번째로 가까운"
-   - "가장 높은", "가장 낮은", "가장 위에 있는"
+**예시 3** (exo_data_sample.json - 여러 조건 동시 적용):
+- 질문: "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa?"
+- 선택지: (a) handbag, (b) coke, (c) laptop, (d) cell phone
+- 근거: laptop과 cell phone은 소파 위에 있음 (POS 조건 불만족), coke는 원통형이므로 제외 (ATT 조건 불만족), handbag만 바닥에 있고 사각형 모양 (모든 조건 만족)
+- ✅ **복잡도**: ATT 조건 + REL 조건(위치 상태) + POS 조건이 모두 적용됨
+- ✅ **고급 추론**: 각 선택지가 서로 다른 이유로 제외됨 (위치, 형태 등)
 
-5. **3-hop 질문 구조 예시** (exo_data_sample.json, web_annotations_exo.json 참고):
-   - "테이블 중앙에 있는 빨간색 bowl 왼쪽 사이드에 위치한 정사각형 또는 직사각형 객체에서 창문으로부터 가장 가까운 객체는?"
-     → POS: 테이블 중앙에 있는 빨간색 bowl 왼쪽 사이드에, ATT: 정사각형 또는 직사각형 객체, REL: 가장 가까운
-     → ❌ "이미지 중앙에" (모호함) 대신 ✅ "테이블 중앙에" (구체적)
-     → **위치 반전**: 실제로 "오른쪽"에 있으면 질문에서는 "왼쪽"으로 표현
-   
-   - "테이블 위에서 와인잔으로부터 가장 먼 식용 가능한 물체는 무엇인가?"
-     → POS: 테이블 위에서, ATT: 식용 가능한 물체, REL: 가장 먼
-   
-   - "소파 오른쪽에 있는 사람 중에서 텔레비전으로부터 가장 먼 사람은 누구인가?"
-     → POS: 소파 오른쪽에, ATT: 사람, REL: 가장 먼
-     → **위치 반전**: 실제로 "왼쪽"에 있으면 질문에서는 "오른쪽"으로 표현
-   
-   - "싱크대 왼쪽 사이드에 위치한 흰색 색상의 객체에서 가장 멀리 떨어져 있는 것은?"
-     → POS: 싱크대 왼쪽 사이드에, ATT: 흰색 색상의 객체, REL: 가장 멀리 떨어져 있는
-     → ❌ "이미지 중앙에 있는 싱크대" (모호함) 대신 ✅ "싱크대" (구체적)
-     → **위치 반전**: 실제로 "오른쪽"에 있으면 질문에서는 "왼쪽"으로 표현
+**예시 4** (web_annotations_exo.json - 복잡한 기준점):
+- 질문: "Which object is <REL>farthest</REL> from the <ATT>white object</ATT> <POS>on the left side of</POS> the child wearing a striped shirt in the center?"
+- 선택지: (a) keyboard, (b) piano, (c) sofa, (d) plant
+- 근거: sofa는 아이 오른쪽에 있음 (POS 조건 불만족), keyboard와 piano는 더 가까움 (REL 조건 불만족), plant가 가장 멀리 있음
+- ✅ **복잡도**: 기준점이 "흰색 객체"이고, 그 객체의 위치가 "아이 왼쪽"이라는 중첩된 조건
+- ✅ **고급 추론**: 기준점을 먼저 찾고, 그 기준점으로부터 거리를 계산해야 함
 
-6. **CRITICAL - 질문 유형 제한 (생뚱맞는 질문 금지)**:
-   - ❌ 절대 사용 금지 - 색상이나 종류를 묻는 질문:
-     * "어떤 색상인가요?", "무슨 색인가요?", "색깔은 무엇인가요?"
-     * "어떤 잡지인가요?", "무슨 종류인가요?", "어떤 타입인가요?"
-     * "어떤 모양인가요?", "무슨 형태인가요?"
-     * 이런 질문들은 VQA 태스크에 적합하지 않으며 절대 생성하지 마세요.
-   
-   - ✅ 반드시 사용 - 구체적인 객체를 묻는 질문:
-     * "어떤 객체는?", "무엇은?", "어떤 물체는?"
-     * "어떤 컵은?", "어떤 의자는?", "어떤 사람은?"
-     * 질문의 답은 반드시 구체적인 객체(컵, 의자, 사람, 테이블 등)여야 합니다.
-   
-   - **중요**: 질문은 반드시 이미지 내에 존재하는 구체적인 객체를 묻는 형태여야 하며, 색상, 종류, 모양 등 추상적인 속성만을 묻는 질문은 절대 생성하지 마세요.
+**예시 5** (web_annotations_exo.json - 복잡한 속성 조합):
+- 질문: "Which <ATT>object that can hold water</ATT> is the <REL>closest</REL> to the pizza placed in front of the woman <POS>on the left</POS>?"
+- 선택지: (a) fork, (b) empty glass, (c) blue vase, (d) water glass
+- 근거: fork는 물을 담을 수 없음 (ATT 조건 불만족), blue vase와 water glass는 오른쪽 여자에게 더 가까움 (POS 조건 불만족), empty glass가 왼쪽 여자 앞 피자에 가장 가까움
+- ✅ **복잡도**: ATT 조건(기능적 속성) + POS 조건(여자의 위치) + REL 조건이 모두 적용됨
+- ✅ **고급 추론**: ATT 조건을 만족하는 객체가 3개(b, c, d) 있어서 위치와 거리를 모두 고려해야 함
 
-7. **질문 다양성**: 3개의 질문은 서로 다른 구조와 조합을 가져야 합니다:
-   - 질문 1: [POS]에 있는 [ATT] 중에서 [기준 객체]로부터 [REL]인 것은?
-   - 질문 2: [기준 객체] [POS]에 위치한 [ATT]에서 [다른 기준]으로부터 [REL]인 것은?
-   - 질문 3: [POS]의 [ATT] 중 [기준 객체]와 [REL]인 것은?
+**예시 6** (web_annotations_exo.json - 복잡한 공간 관계):
+- 질문: "Which object <REL>farthest</REL> from the window <POS>on the table</POS> among the <ATT>square or rectangular objects</ATT>?"
+- 선택지: (a) backpack, (b) laptop, (c) beige book, (d) blue bowl
+- 근거: backpack은 테이블 위에 없음 (POS 조건 불만족), blue bowl은 사각형이 아님 (ATT 조건 불만족), laptop은 beige book보다 창문에 가까움 (REL 조건 불만족), beige book이 가장 멀리 있음
+- ✅ **복잡도**: POS 조건 + ATT 조건 + REL 조건이 모두 적용됨
+- ✅ **고급 추론**: 각 선택지가 서로 다른 이유로 제외되고, ATT 조건을 만족하는 객체 중에서 거리를 계산해야 함
 
-8. **CRITICAL - 정답 및 선택지 요구사항 (소거법을 위한 선택지 구성)**:
-   - **정답은 반드시 이미지의 bbox 객체여야 함** (COCO 어노테이션에 존재하는 객체)
-   - **CRITICAL - 선택지는 반드시 이미지 내에 존재하는 객체만 사용**:
-     * 각 선택지는 이미지 분석 결과와 COCO 어노테이션에서 확인된 객체만 사용하세요.
-     * 이미지에 존재하지 않는 객체를 선택지로 사용하는 것은 절대 금지입니다.
-     * 예를 들어, 이미지에 "파란색 잡지"가 없다면 "파란색 잡지"를 선택지로 사용하지 마세요.
-     * 이미지에 "노란색 컵"이 없다면 "노란색 컵"을 선택지로 사용하지 마세요.
-     * 이미지 분석 결과와 COCO 객체 정보를 정확히 확인하여 실제로 존재하는 객체만 선택지로 사용하세요.
-   - **소거법(Elimination Method)을 위한 선택지 구성**: 각 선택지는 서로 다른 이유로 제외될 수 있어야 함
-     * 예시 질문: "이미지 중앙에 있는 싱크대의 오른쪽 사이드 위치한 흰색 색상의 객체에서 가장 멀리 떨어져 있는 것은?"
-     * 올바른 선택지 구성:
-       - a: cup (싱크대 왼쪽에 위치 → 위치 조건 불만족)
-       - b: dining table (싱크대 오른쪽에 위치하지만 흰색이 아님 → 색상 조건 불만족)
-       - c: coffee machine (싱크대 오른쪽에 위치하고 흰색이지만, d보다 가까움 → 거리 조건 불만족)
-       - d: microwave (정답: 싱크대 오른쪽, 흰색, 가장 멀리 떨어져 있음)
-     * 소거법 rationale 예시:
-       - "a가 아닌 이유: 싱크대 왼쪽에 위치하기 때문"
-       - "b가 아닌 이유: 싱크대 오른쪽에 위치하지만 흰색이 아니기 때문"
-       - "c가 아닌 이유: d보다 더 가까이 있기 때문"
-       - "d가 정답인 이유: d가 c보다 더 멀리 떨어져 있기 때문"
-   
-   - **선택지 구성 원칙**:
-     * 각 선택지는 질문의 조건 중 하나를 만족하지 않아야 함 (위치, 색상, 속성, 거리 등)
-     * 정답을 제외한 나머지 선택지들은 각각 다른 이유로 제외될 수 있어야 함
-     * 같은 종류의 객체가 여러 개 있을 경우, 반드시 구분 가능한 속성으로 명시
-       - ✅ 올바른 예시: "red cup", "blue cup", "leftmost cup", "rightmost cup"
-       - ✅ 올바른 예시: "green t-shirt person", "blue shirt man", "white shirt woman"
-       - ❌ 잘못된 예시: "작은 컵", "큰 컵", "중간 크기 컵" (주관적 크기 표현 금지)
-       - ❌ 잘못된 예시: "예쁜 꽃병", "멋진 의자" (주관적 미적 판단 금지)
-     * **CRITICAL - 선택지 검증**: 각 선택지는 반드시 이미지 분석 결과와 COCO 어노테이션에서 확인된 객체여야 합니다.
-     * 이미지에 존재하지 않는 객체를 선택지로 사용하는 것은 절대 금지입니다.
-     * 예를 들어, 이미지에 "파란색 잡지"가 없다면 "파란색 잡지"를 선택지로 사용하지 마세요.
-     * 이미지에 "노란색 컵"이 없다면 "노란색 컵"을 선택지로 사용하지 마세요.
-     * 각 선택지는 bbox로 식별 가능해야 하며, 이미지 내에 실제로 존재해야 합니다.
-     * 선택지 간 모호성이 없어야 함 (같은 객체를 가리키는 다른 표현 사용 금지)
-     * 이미지 분석 결과에서 언급된 색상, 위치, 속성 정보를 활용하여 선택지를 명확히 구분하세요
-     * **CRITICAL**: 선택지에도 추상적 표현(크기, 미적 판단 등)을 절대 사용하지 말고, 객관적이고 구체적인 속성(색상, 모양, 재질, 위치 등)만 사용하세요
+**🚨 CRITICAL - 선택지 구성 원칙 (절대 필수)**:
 
-9. **CRITICAL - 위치 표현 명확성 및 반전 규칙**:
-   - ❌ 절대 사용 금지: "이미지 중앙에", "이미지 왼쪽에", "이미지 오른쪽에" (모호함 - 중앙의 기준이 사람마다 다름)
-   - ✅ 반드시 사용: 구체적인 객체를 기준으로 위치 설명
-     * "테이블 중앙에", "소파 왼쪽에", "싱크대 오른쪽에"
-     * "카운터 중앙에", "냉장고 왼쪽에", "식탁 오른쪽에"
-   - 위치를 설명할 때는 반드시 구체적인 객체(테이블, 소파, 싱크대, 카운터, 식탁, 냉장고 등)를 기준으로 하세요.
-   - 이미지 분석 결과에서 언급된 구체적인 객체를 활용하여 위치를 명확히 설명하세요.
-   - **CRITICAL - 위치 반전 규칙**: 질문 생성 시 "왼쪽"과 "오른쪽"을 반드시 반대로 변환하세요:
-     * 실제로 "왼쪽"에 있는 경우 → 질문에서는 "오른쪽"으로 표현
-     * 실제로 "오른쪽"에 있는 경우 → 질문에서는 "왼쪽"으로 표현
-     * 이 규칙은 모든 위치 표현에 적용됩니다 (예: "왼쪽 사이드" → "오른쪽 사이드", "오른쪽에" → "왼쪽에")
+1. **다양한 제외 이유**: 각 선택지는 서로 다른 이유로 제외되어야 합니다:
+   - ATT 조건 불만족 (속성, 형태, 색상 등)
+   - POS 조건 불만족 (위치, 공간 관계 등)
+   - REL 조건 불만족 (거리, 순서 등)
+   - 여러 조건 동시 불만족
 
-10. **CRITICAL - 표현의 객관성 및 구체성**:
-   - ❌ 절대 사용 금지 - 추상적이고 주관적인 표현:
-     * 크기 관련: "작은", "큰", "중간 크기", "보통 크기", "적당한 크기"
-     * 미적 판단: "예쁜", "멋진", "좋은", "나쁜", "아름다운"
-     * 모호한 표현: "일반적인", "특별한", "보통의"
-   
-   - ✅ 반드시 사용 - 객관적이고 구체적인 표현:
-     * 색상: "빨간색", "파란색", "흰색", "검은색", "녹색"
-     * 모양: "정사각형", "원형", "직사각형", "둥근", "각진"
-     * 재질: "나무", "유리", "금속", "플라스틱", "천"
-     * 기능/용도: "식용 가능한", "의자", "테이블", "컵", "책"
-     * 위치: "왼쪽", "오른쪽", "중앙", "위", "아래" (구체적 객체 기준)
-     * 패턴: "줄무늬", "체크 무늬", "단색", "무늬 있는"
-   
-   - 질문과 선택지 모두에서 객관적이고 구체적인 속성만 사용하세요.
-   - 이미지 분석 결과에서 확인 가능한 구체적인 정보를 활용하세요.
+2. **ATT 조건 만족 객체 최소 2개 이상**: 질문의 ATT 조건을 만족하는 객체가 선택지에 최소 2개 이상 있어야 합니다. 이렇게 해야 단순히 ATT 조건만 확인해서는 정답을 찾을 수 없고, 추가적인 추론(POS, REL)이 필요합니다.
 
-11. **기타 요구사항**:
-   - exo-centric 관점 (외부 관찰자 시점)
-   - 4개의 객관식 선택지 (a, b, c, d)
-   - 한글로 질문 생성 (ATT, POS, REL 태그는 포함하지 않음 - 나중에 번역 시 추가됨)
+3. **선택지 다양성**: 선택지는 다양한 카테고리와 속성을 포함해야 합니다:
+   - ❌ 나쁜 예: "밝은 색상의 의자", "밝은 색상의 벤치", "밝은 색상의 식탁", "밝은 색상의 쓰레기통" (모두 같은 속성)
+   - ✅ 좋은 예: "glass", "potato fries", "hamburger", "cell phone" (다양한 속성과 카테고리)
 
-**소거법을 위한 선택지 구성 예시**:
-질문: "싱크대의 왼쪽 사이드에 위치한 흰색 색상의 객체에서 가장 멀리 떨어져 있는 것은?"
-→ ❌ "이미지 중앙에 있는 싱크대" (모호함) 대신 ✅ "싱크대" (구체적)
-→ **위치 반전**: 실제로 "오른쪽"에 있으면 질문에서는 "왼쪽"으로 표현
-선택지:
-- a: cup (위치 조건 불만족 - 싱크대 왼쪽에 위치)
-- b: dining table (색상 조건 불만족 - 싱크대 오른쪽이지만 흰색이 아님)
-- c: coffee machine (거리 조건 불만족 - 흰색이고 오른쪽이지만 d보다 가까움)
-- d: microwave (정답 - 모든 조건 만족하고 가장 멀리 떨어져 있음)
+**중요**: 위 예시들을 참고하여:
+1. **복잡한 질문 구조**: 단순한 "X 오른쪽에 있는 가장 가까운 Y 객체" 형식은 절대 사용하지 마세요
+2. **중첩된 조건**: 여러 조건이 동시에 적용되는 질문을 생성하세요
+3. **다양한 제외 이유**: 각 선택지가 서로 다른 이유로 제외되도록 구성하세요
+4. **ATT 조건 만족 객체 최소 2개**: 고급 추론이 필요하도록 선택지를 구성하세요
 
-소거법 rationale:
-- "a가 아닌 이유: 싱크대 왼쪽에 위치하기 때문"
-- "b가 아닌 이유: 싱크대 오른쪽에 위치하지만 흰색이 아니기 때문"
-- "c가 아닌 이유: d보다 더 가까이 있기 때문"
-- "d가 정답인 이유: d가 c보다 더 멀리 떨어져 있기 때문"
+**출력 형식 (반드시 JSON 형식으로, 정확히 3개만 생성)**:
 
-출력 형식 (반드시 JSON 형식으로, 정확히 3개만 생성):
+🚨 **CRITICAL**: 모든 질문은 반드시 "~객체"로 끝나야 합니다. "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요.
+
 {{
   "questions": [
     {{
-      "question": "첫 번째 3-hop 한글 질문 (ATT, POS, REL 모두 포함, 소거법 가능한 선택지 구성)",
+      "question": "첫 번째 3-hop 한글 질문 (ATT는 속성 기반 표현, POS는 구체적 객체 기준, REL 포함, 소거법 가능한 선택지 구성, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
       "choices": {{
-        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함)",
-        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함)",
-        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함)",
-        "d": "선택지 d (한글, 정답)"
+        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "d": "선택지 d (한글, 정답, ATT 조건 만족 객체 중 하나)"
       }},
       "correct_answer": "a"
     }},
     {{
-      "question": "두 번째 3-hop 한글 질문 (첫 번째와 다른 구조/조합, 소거법 가능한 선택지 구성)",
+      "question": "두 번째 3-hop 한글 질문 (첫 번째와 다른 구조/조합, ATT는 속성 기반 표현, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
       "choices": {{
-        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함)",
-        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함)",
-        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함)",
-        "d": "선택지 d (한글, 정답)"
+        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "d": "선택지 d (한글, 정답, ATT 조건 만족 객체 중 하나)"
       }},
       "correct_answer": "b"
     }},
     {{
-      "question": "세 번째 3-hop 한글 질문 (앞의 두 질문과 다른 구조/조합, 소거법 가능한 선택지 구성)",
+      "question": "세 번째 3-hop 한글 질문 (앞의 두 질문과 다른 구조/조합, ATT는 속성 기반 표현, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
       "choices": {{
-        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함)",
-        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함)",
-        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함)",
-        "d": "선택지 d (한글, 정답)"
+        "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "c": "선택지 c (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
+        "d": "선택지 d (한글, 정답, ATT 조건 만족 객체 중 하나)"
       }},
       "correct_answer": "c"
     }}
   ]
 }}
 
-**중요**: 정확히 3개의 질문만 생성하고, 각 질문은 반드시 ATT, POS, REL 세 가지 요소를 모두 포함해야 하며, 서로 다른 구조와 조합을 가져야 합니다. 반드시 유효한 JSON 형식으로 응답하세요."""
+**질문 형식 예시 (반드시 참고)**:
 
-        generation_response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert VQA question generator. Generate accurate, concise 3-hop questions. CRITICAL: 1) Each question MUST include ATT (attribute), POS (position), REL (relationship). 2) Use ONLY objects that actually exist in the image. 3) Choices must be clearly distinguishable (use color, position: 'red cup', 'leftmost chair'). 4) For POS, use specific object references ('center of table', NOT 'center of image'). 5) Reverse left/right positions in questions. 6) Use ONLY objective attributes (color, shape, material) - NEVER subjective ('small', 'pretty'). 7) Ask about concrete objects, NOT abstract properties. 8) Generate exactly 3 questions with different structures. Return valid JSON."
-                },
-                {
-                    "role": "user",
-                    "content": question_generation_prompt
-                }
-            ],
-            temperature=0.5,  # 온도 낮춤: 더 일관된 결과 (0.8 -> 0.5)
-            max_tokens=2000,  # 토큰 수 감소: 더 빠른 처리 (2500 -> 2000)
-            response_format={"type": "json_object"}
-        )
+**❌ 절대 금지 - 너무 단순한 질문**:
+- "테이블 위에 있는 가장 가까운 원형 또는 원통형의 객체" (단순 위치+속성)
+- "소파 왼쪽에 위치한 밝은 색상의 객체" (단순 위치+속성)
+- "싱크대 오른쪽에 있는 무채색 객체" (단순 위치+속성)
+- "소파 왼쪽에 있는 사람은 누구인가요?" (금지 - "는 누구인가요?" 사용)
+- "테이블 위에 있는 것은 무엇인가요?" (금지 - ATT 속성 미명시, "는 무엇인가요?" 사용)
+- "가장 가까운 것은?" (금지 - ATT 속성 미명시, "는?" 사용)
+
+**✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문**:
+- "식용 가능한 객체 중에서 포크로부터 가장 먼 객체" (ATT + REL + 기준점)
+- "테이블 위에 있는 원형 또는 원통형 객체 중에서 사람으로부터 가장 먼 객체" (POS + ATT + REL)
+- "소파 왼쪽에 있는 밝은 색상의 객체 중에서 창문으로부터 가장 가까운 객체" (POS + ATT + REL)
+- "식용 가능한 객체 중에서 포크 왼쪽에 있는 가장 먼 객체" (ATT + POS + REL)
+- "테이블 중앙에 있는 원형 또는 원통형 객체 중에서 사람 앞에 있는 가장 가까운 객체" (POS + ATT + POS + REL)
+- "식용 가능한 객체 중에서 테이블 왼쪽에 있는 포크로부터 가장 먼 객체" (ATT + POS + REL)
+
+🚨 **최종 검증 체크리스트 (생성 전 반드시 확인)**:
+
+**질문 복잡도 검증**:
+- [ ] 질문이 단순한 "X 오른쪽에 있는 가장 가까운 Y 객체" 형식이 아닌가? (이런 형식은 절대 금지)
+- [ ] 질문에 중첩된 조건이나 복잡한 공간 관계가 포함되어 있는가?
+- [ ] 각 질문에 ATT, POS, REL이 모두 포함되어 있고, 서로 복잡하게 얽혀있는가?
+
+**질문 형식 검증**:
+- [ ] **CRITICAL**: 질문이 "~객체"로 끝나는가? ("는?", "는 무엇인가요?", "~사람은 누구인가요?", "것은 무엇인가요?" 형식 금지)
+- [ ] ATT 태그에 구체적 명사("컵", "접시" 등)가 아닌 속성 기반 표현("원형 또는 원통형 객체" 등)을 사용했는가?
+- [ ] ATT 속성이 실제 이미지의 객체와 정확히 일치하는가?
+- [ ] POS 표현이 구체적 객체 기준인가? ("이미지 중앙" 대신 "테이블 중앙" 등)
+- [ ] 위치 반전 규칙을 적용했는가? (실제 왼쪽 → 질문에서는 오른쪽)
+
+**선택지 구성 검증**:
+- [ ] 질문의 ATT 조건을 만족하는 객체가 선택지에 최소 2개 이상 있는가? (고급 추론 능력 요구)
+- [ ] 각 선택지는 서로 다른 이유로 제외될 수 있는가? (ATT 불만족, POS 불만족, REL 불만족 등)
+- [ ] 선택지에 동일한 물체가 중복되지 않았는가?
+- [ ] 선택지의 모든 객체가 이미지에 실제로 존재하는가?
+- [ ] 선택지가 다양한 카테고리와 속성을 포함하고 있는가? (모두 같은 속성의 객체가 아닌가?)
+
+**중요**: 정확히 3개의 질문만 생성하고, 각 질문은 반드시 위의 모든 규칙을 준수해야 합니다. 반드시 유효한 JSON 형식으로 응답하세요."""
+
+        # RateLimitError 처리: 재시도 로직 포함
+        max_retries = 5
+        retry_delay = 1  # 초기 대기 시간 (초)
         
-        generated_content = generation_response.choices[0].message.content.strip()
+        generation_response = None
+        generated_content = None
+        
+        for attempt in range(max_retries):
+            try:
+                generation_response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert VQA question generator specializing in complex, multi-hop reasoning questions. CRITICAL RULES: 1) Each question MUST include ATT (attribute), POS (position), REL (relationship) in a COMPLEX, INTERWOVEN manner - NOT simple patterns like 'X right side, closest Y object'. 2) Questions MUST require advanced reasoning with nested conditions, multiple spatial relationships, or complex attribute combinations. 3) Use ONLY objects that actually exist in the image. 4) Choices must be clearly distinguishable and diverse (use color, position: 'red cup', 'leftmost chair'). 5) For POS, use specific object references ('center of table', NOT 'center of image'). 6) Reverse left/right positions in questions. 7) Use ONLY objective attributes (color, shape, material) - NEVER subjective ('small', 'pretty'). 8) Ask about concrete objects, NOT abstract properties. 9) At least 2 choices MUST satisfy the ATT condition to require advanced reasoning. 10) Each choice should be excluded for DIFFERENT reasons (ATT failure, POS failure, REL failure, etc.). 11) Generate exactly 3 questions with DIFFERENT complex structures. Return valid JSON."
+                        },
+                        {
+                            "role": "user",
+                            "content": question_generation_prompt
+                        }
+                    ],
+                    temperature=0.5,
+                    max_tokens=2000,
+                    response_format={"type": "json_object"}
+                )
+                
+                generated_content = generation_response.choices[0].message.content.strip()
+                break  # 성공하면 루프 종료
+                
+            except RateLimitError as e:
+                if attempt < max_retries - 1:
+                    # retry_after 정보가 있으면 사용, 없으면 exponential backoff
+                    wait_time = getattr(e, 'retry_after', None)
+                    if wait_time is None:
+                        wait_time = retry_delay * (2 ** attempt)  # exponential backoff
+                    else:
+                        wait_time = float(wait_time) + 1  # retry_after에 1초 추가 여유
+                    
+                    print(f"[WARN] Rate limit reached. Waiting {wait_time:.2f} seconds before retry {attempt + 1}/{max_retries}...")
+                    import time
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 마지막 시도에서도 실패하면 에러 반환
+                    return jsonify({
+                        'success': False,
+                        'error': f'Rate limit exceeded after {max_retries} retries. Please try again later or reduce parallel workers.'
+                    }), 429
+            except Exception as e:
+                # RateLimitError가 아닌 다른 에러는 즉시 반환
+                import traceback
+                traceback.print_exc()
+                return jsonify({'success': False, 'error': f'OpenAI question generation failed: {str(e)}'}), 500
+        
+        if generated_content is None:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to generate questions after retries'
+            }), 500
         
         # JSON 파싱
         try:
@@ -1067,13 +1287,11 @@ CRITICAL REQUIREMENTS - 3-HOP QUESTIONS:
                 'questions': questions
             })
         except json.JSONDecodeError as e:
-            # JSON 파싱 실패 시 텍스트에서 추출 시도
             return jsonify({'success': False, 'error': f'Failed to parse JSON: {str(e)}', 'raw_response': generated_content}), 500
-        
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': f'OpenAI question generation failed: {str(e)}'}), 500
 
 @app.route('/api/translate/question_and_choices', methods=['POST'])
 def translate_question_and_choices():
@@ -1103,9 +1321,15 @@ def translate_question_and_choices():
         
         # 이미지 분석 결과 가져오기 (캐시에서만 확인)
         # 프론트엔드에서 이미 분석을 수행하므로 여기서는 캐시만 확인
+        # 캐시 키는 "image_id_model" 형식이므로 모든 모델의 캐시를 확인
         image_analysis = ""
-        if image_id and image_id in image_analysis_cache:
-            image_analysis = image_analysis_cache[image_id]
+        if image_id:
+            # 기본 모델부터 확인
+            for model_name in [DEFAULT_MODEL, 'openai']:
+                cache_key = f"{image_id}_{model_name}"
+                if cache_key in image_analysis_cache:
+                    image_analysis = image_analysis_cache[cache_key]
+                    break
         
         # Question과 Choices를 함께 번역하는 프롬프트 (이미지 분석 결과 포함)
         image_context = ""
@@ -1278,9 +1502,15 @@ def translate_rationale():
         client = OpenAI(api_key=OPENAI_API_KEY)
         
         # 이미지 분석 결과 가져오기 (캐시에서)
+        # 캐시 키는 "image_id_model" 형식이므로 모든 모델의 캐시를 확인
         image_analysis = ""
-        if image_id and image_id in image_analysis_cache:
-            image_analysis = image_analysis_cache[image_id]
+        if image_id:
+            # 기본 모델부터 확인
+            for model_name in [DEFAULT_MODEL, 'openai']:
+                cache_key = f"{image_id}_{model_name}"
+                if cache_key in image_analysis_cache:
+                    image_analysis = image_analysis_cache[cache_key]
+                    break
         
         # Question과 Response 정보 가져오기 (소거법 형식을 위해)
         question = data.get('question', '').strip()
@@ -2372,13 +2602,15 @@ def main():
     if args.test_folder:
         exo_images_path = os.path.join(args.mscoco_folder, args.test_folder)
         print(f"[INFO] Using test folder: {exo_images_path}")
+        # test_folder 모드에서는 ego_images_path를 설정하지 않음 (사용하지 않음)
+        ego_images_path = None
     else:
         exo_images_path = os.path.join(args.mscoco_folder, 'exo_images')
-    ego_images_path = os.path.join(args.mscoco_folder, 'ego_images')
+        ego_images_path = os.path.join(args.mscoco_folder, 'ego_images')
     
     if not os.path.exists(exo_images_path):
         print(f"Warning: exo images folder not found: {exo_images_path}")
-    if not os.path.exists(ego_images_path):
+    if ego_images_path and not os.path.exists(ego_images_path):
         print(f"Warning: ego_images folder not found: {ego_images_path}")
     
     if not os.path.exists(args.coco_json):
