@@ -144,29 +144,12 @@ git pull
 
 ## 📦 프로젝트 초기 설정
 
-### 1. 가상환경 생성 (권장)
+### 1. 필수 패키지 설치
 
 프로젝트 폴더에서 터미널을 열고 다음 명령 실행:
 
 ```powershell
-# 가상환경 생성
-python -m venv .venv
-
-# 가상환경 활성화 (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# 가상환경 활성화 (Command Prompt)
-.venv\Scripts\activate.bat
-```
-
-**활성화 확인:** 터미널 프롬프트 앞에 `(.venv)` 표시가 나타나면 성공
-
-### 2. 필수 패키지 설치
-
-가상환경이 활성화된 상태에서:
-
-```powershell
-pip install flask pillow pycocotools openai python-docx
+pip install flask pillow pycocotools openai
 ```
 
 **설치 확인:**
@@ -179,9 +162,20 @@ pip list
 - pillow
 - pycocotools
 - openai
-- python-docx
 
-### 3. API 키 설정
+**참고:** 가상환경을 사용하고 싶다면 다음 명령으로 생성할 수 있습니다 (선택사항):
+```powershell
+# 가상환경 생성
+python -m venv .venv
+
+# 가상환경 활성화 (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# 가상환경 활성화 (Command Prompt)
+.venv\Scripts\activate.bat
+```
+
+### 2. API 키 설정
 
 1. 프로젝트 루트에 `config.py` 파일 생성 (없는 경우)
 2. 다음 내용 입력:
@@ -199,7 +193,7 @@ pip list
 
 **⚠️ 중요:** `config.py`는 Git에 업로드되지 않습니다 (`.gitignore`에 포함됨)
 
-### 4. 필요한 파일 및 폴더 준비
+### 3. 필요한 파일 및 폴더 준비
 
 프로젝트를 사용하려면 다음 파일/폴더가 필요합니다:
 
@@ -211,38 +205,21 @@ mscoco/
 │   └── *.jpg                     # 이미지 파일들
 ├── ego_images/                   # Ego 이미지 폴더 (선택사항)
 │   └── *.jpg                     # 이미지 파일들
-└── exo_images_251111/            # 테스트용 이미지 폴더 (선택사항)
-    └── *.jpg                     # 이미지 파일들
+└── question_candidates_exo.json  # 질문 후보 파일 (선택사항)
 ```
 
 **참고:** 이 파일들은 용량이 크거나 Git에 포함되지 않으므로 로컬에서 직접 준비해야 합니다.
 
 ## 🖥️ 서버 실행 방법
 
-### 방법 1: 배치 파일 사용 (Windows, 권장)
+### 기본 실행
 
-**테스트 폴더로 실행 (exo_images_251111):**
-
-1. `start_server_251111.bat` 파일 더블클릭
-2. 또는 터미널에서:
-   ```powershell
-   .\start_server_251111.bat
-   ```
-3. 서버가 `http://localhost:5001`에서 실행됩니다
-
-### 방법 2: 명령줄로 직접 실행
-
-**기본 실행:**
 ```powershell
 python coco_web_annotator.py --mscoco_folder ./mscoco --coco_json ./mscoco/instances_train2017.json --output_json ./mscoco/web_annotations.json
 ```
 
-**테스트 폴더 지정 (exo_images_251111):**
-```powershell
-python coco_web_annotator.py --mscoco_folder ./mscoco --coco_json ./mscoco/instances_train2017.json --output_json ./mscoco/web_annotations.json --test_folder exo_images_251111 --port 5001
-```
+### 커스텀 설정
 
-**커스텀 설정:**
 ```powershell
 python coco_web_annotator.py `
     --mscoco_folder ./mscoco `
@@ -250,7 +227,7 @@ python coco_web_annotator.py `
     --output_json ./mscoco/web_annotations.json `
     --categories_json ./mscoco/categories.json `
     --host 0.0.0.0 `
-    --port 5001
+    --port 5000
 ```
 
 ### 실행 옵션 설명
@@ -258,17 +235,17 @@ python coco_web_annotator.py `
 - `--mscoco_folder`: 이미지 폴더가 있는 루트 경로 (기본값: `./mscoco`)
 - `--coco_json`: COCO 어노테이션 JSON 파일 경로 (필수)
 - `--output_json`: 저장할 어노테이션 파일 이름 (필수, 실제로는 `_exo.json`, `_ego.json` 두 파일 생성)
-- `--test_folder`: 특정 폴더의 이미지만 로드 (예: `exo_images_251111`)
+- `--test_folder`: 특정 폴더의 이미지만 로드 (선택사항, 관리자용)
 - `--categories_json`: 커스텀 카테고리 매핑 파일 (선택사항)
 - `--host`: 서버 호스트 (기본값: `0.0.0.0`)
 - `--port`: 서버 포트 (기본값: `5000`)
 
-### 3. 웹 인터페이스 접속
+### 웹 인터페이스 접속
 
 서버가 실행되면 브라우저에서 접속:
 
-- **로컬**: `http://localhost:5001` (또는 실행한 포트)
-- **원격 서버**: `http://[서버IP]:5001`
+- **로컬**: `http://localhost:5000` (또는 실행한 포트)
+- **원격 서버**: `http://[서버IP]:5000`
 
 ## 📝 작업 방법
 
@@ -288,7 +265,7 @@ python coco_web_annotator.py `
 - **Image ID 검색**: Image ID 입력 후 "Go" 버튼 클릭
 
 **자동 로드 기능:**
-- 이미지를 로드하면 `question_candidates_exo_251111.json` 파일에서 해당 이미지의 질문과 선택지가 자동으로 로드됩니다
+- 이미지를 로드하면 `question_candidates_exo.json` 파일에서 해당 이미지의 질문과 선택지가 자동으로 로드됩니다
 - 기존 어노테이션이 있으면 그것이 우선 표시됩니다
 
 #### Step 2: 한글 입력 (왼쪽 패널)
@@ -333,7 +310,7 @@ python coco_web_annotator.py `
 - **자동 저장**: 30초마다 자동 저장
 - 페이지 종료 시에도 자동 저장
 
-### 3. 번역 기능 사용 (선택사항)
+### 3. 번역 기능 사용
 
 **QA 자동 생성:**
 - 현재는 질문이 미리 생성되어 자동으로 로드됩니다
@@ -345,40 +322,7 @@ python coco_web_annotator.py `
 
 ## 🛠️ 툴 사용법
 
-### 1. 질문 생성 배치 스크립트
-
-대량의 이미지에 대해 질문을 미리 생성하는 스크립트입니다.
-
-**사용법:**
-
-```powershell
-# 배치 파일 사용 (Windows)
-.\run_question_generation_251111.bat
-
-# 또는 명령줄로 직접 실행
-python generate_exo_questions.py `
-    --model openai `
-    --output mscoco/question_candidates_exo_251111.json `
-    --parallel 5 `
-    --base_url http://localhost:5001
-```
-
-**옵션:**
-- `--model`: 사용할 모델 (기본값: `openai`)
-- `--output`: 출력 JSON 파일 경로
-- `--parallel`: 병렬 처리 개수 (기본값: 3)
-- `--base_url`: 서버 URL (기본값: `http://localhost:5000`)
-- `--start_index`: 시작 인덱스 (기본값: 0)
-- `--end_index`: 종료 인덱스 (기본값: None, 전체)
-- `--skip_existing`: 이미 존재하는 어노테이션 건너뛰기
-- `--annotation_path`: 기존 어노테이션 파일 경로
-
-**주의사항:**
-- 서버가 실행 중이어야 합니다
-- OpenAI API 키가 설정되어 있어야 합니다
-- Rate limit 오류가 발생하면 자동으로 재시도합니다
-
-### 2. 이미지 할당 유틸리티 (명령줄)
+### 1. 이미지 할당 유틸리티 (명령줄)
 
 명령줄에서 작업자에게 이미지를 할당하는 유틸리티입니다.
 
@@ -413,14 +357,11 @@ etri_annotation_tool/
 ├── config.txt                 # config.py 생성용 템플릿 파일
 ├── exo_data_sample.json       # 출력 형식 샘플
 ├── README.md                  # 이 파일
-├── start_server_251111.bat    # 서버 실행 배치 파일 (Windows)
-├── run_question_generation_251111.bat # 질문 생성 배치 파일 (Windows)
 ├── mscoco/
 │   ├── exo_images/            # Exo 이미지 폴더
 │   ├── ego_images/            # Ego 이미지 폴더
-│   ├── exo_images_251111/     # 테스트용 이미지 폴더
 │   ├── instances_train2017.json  # COCO 어노테이션 파일
-│   ├── question_candidates_exo_251111.json # 질문 후보 파일 (자동 생성)
+│   ├── question_candidates_exo.json # 질문 후보 파일 (선택사항)
 │   ├── web_annotations_exo.json   # Exo 어노테이션 출력 파일
 │   └── web_annotations_ego.json  # Ego 어노테이션 출력 파일
 └── templates/
@@ -434,7 +375,7 @@ etri_annotation_tool/
 - **오른쪽 패널**: 영어 출력 및 어노테이션 관리
 
 ### 2. 자동 질문 로드
-- 이미지 로드 시 `question_candidates_exo_251111.json`에서 질문과 선택지 자동 로드
+- 이미지 로드 시 `question_candidates_exo.json`에서 질문과 선택지 자동 로드
 - 기존 어노테이션이 있으면 우선 표시
 
 ### 3. GPT-4o 기반 번역
@@ -589,7 +530,7 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 - 같은 `image_id`가 이미 존재하면 덮어쓰기됩니다 (중복 방지)
 - 번역 기능은 GPT-4o를 사용하며, 이미지 분석을 통해 더 정확한 번역을 제공합니다
 - 작업자 관리 시스템은 `worker_management.py`를 통해 동작하며, 작업자 정보는 `workers.json`에 저장됩니다
-- `question_candidates_exo_251111.json` 파일은 질문 생성 스크립트로 미리 생성해야 합니다
+- `question_candidates_exo.json` 파일은 관리자가 질문 생성 스크립트로 미리 생성하여 제공합니다
 
 ## 📄 라이선스
 

@@ -340,7 +340,7 @@ def get_question_candidate(index):
     image_id = annotator.image_ids[index]
     
     # 질문 후보 JSON 파일 경로
-    question_candidates_path = os.path.join(annotator.mscoco_folder, 'question_candidates_exo_251111.json')
+    question_candidates_path = os.path.join(annotator.mscoco_folder, 'question_candidates_exo.json')
     
     if not os.path.exists(question_candidates_path):
         return jsonify({
