@@ -5,6 +5,7 @@ MS-COCO 데이터셋 이미지를 사용하여 Visual Question Answering (VQA) �
 ## 📋 목차
 
 - [시작하기](#시작하기)
+- [Git 워크플로우](#git-워크플로우)
 - [VSCode 환경 설정](#vscode-환경-설정)
 - [프로젝트 초기 설정](#프로젝트-초기-설정)
 - [서버 실행 방법](#서버-실행-방법)
@@ -41,6 +42,86 @@ python --version
 3. 검색창에 "Python" 입력
 4. Microsoft의 "Python" 확장 프로그램 설치
 5. (선택) "Pylance" 확장 프로그램도 설치 권장
+
+## 🔄 Git 워크플로우
+
+### 처음 시작하기 (Git Clone)
+
+1. **프로젝트 클론**
+   ```powershell
+   git clone [저장소 URL]
+   cd etri
+   ```
+
+2. **config.py 파일 생성**
+   - `config.txt` 파일을 복사하여 `config.py`로 이름 변경
+   - `OPENAI_API_KEY`에 본인의 API 키 입력
+
+3. **필수 패키지 설치** (아래 "프로젝트 초기 설정" 섹션 참고)
+
+### 코드 업데이트 받기 (Git Pull)
+
+관리자가 코드를 수정할 때마다 다음 절차를 따르세요:
+
+#### ⚠️ 중요: Git Pull 전 확인 사항
+
+**다음 파일들은 Git에 포함되지 않으므로, `git pull` 전에 백업하거나 확인해야 합니다:**
+
+1. **작업 파일 (백업 권장)**
+   - `mscoco/web_annotations_exo.json` - 작업한 어노테이션 파일
+   - `mscoco/web_annotations_ego.json` - 작업한 어노테이션 파일
+   - `workers.json` - 작업자 정보
+   - `worker_assignments.json` - 이미지 할당 정보
+   - `worker_stats.json` - 작업 통계
+
+2. **설정 파일 (덮어쓰기 주의)**
+   - `config.py` - API 키 및 설정 (덮어쓰이지 않지만 확인 권장)
+
+3. **기타 파일**
+   - `*.csv` - 통계 파일들
+   - `credentials.json` - Google Drive 인증 파일 (사용하는 경우)
+
+#### Git Pull 실행 방법
+
+```powershell
+# 1. 현재 작업 상태 확인
+git status
+
+# 2. 작업 파일 백업 (선택사항)
+# 필요시 수동으로 백업하거나, Git이 자동으로 처리합니다
+
+# 3. 원격 저장소에서 최신 코드 가져오기
+git pull
+
+# 4. 충돌이 발생한 경우
+# - Git이 자동으로 병합을 시도합니다
+# - 충돌이 발생하면 파일을 확인하고 수동으로 해결해야 합니다
+```
+
+#### 충돌 발생 시 해결 방법
+
+만약 `git pull` 시 충돌이 발생하면:
+
+1. **충돌 파일 확인**
+   ```powershell
+   git status
+   ```
+
+2. **충돌 파일 수동 해결**
+   - VSCode에서 충돌 파일 열기
+   - `<<<<<<<`, `=======`, `>>>>>>>` 표시 확인
+   - 필요한 내용만 남기고 충돌 마커 제거
+
+3. **해결 완료 후 커밋**
+   ```powershell
+   git add [충돌 해결한 파일]
+   git commit -m "Merge conflict resolved"
+   ```
+
+**참고:**
+- 작업 파일들(`web_annotations_exo.json` 등)은 `.gitignore`에 포함되어 있어 Git에 업로드되지 않습니다
+- 따라서 일반적으로 `git pull` 시 충돌이 발생하지 않습니다
+- 하지만 코드 파일(`.py`, `.html` 등)이 수정된 경우 충돌이 발생할 수 있습니다
 
 ## 🔧 VSCode 환경 설정
 
