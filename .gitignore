@@ -32,6 +32,20 @@ mscoco/instances_train2017.json
 mscoco/filtered_annotations.json
 
 # Output files (개인 작업 파일 - 필요시 주석 해제)
-# mscoco/web_annotations_exo.json
-# mscoco/web_annotations_ego.json
+mscoco/web_annotations_exo.json
+mscoco/web_annotations_ego.json
+
+# Worker management files (개인 작업 파일)
+workers.json
+worker_assignments.json
+worker_stats.json
+*.csv
+
+# Google Drive credentials (보안)
+credentials.json
+
+# Batch process results (개인 작업 파일)
+batch_results.json
+test_batch_results.json
+*_batch_results.json
 

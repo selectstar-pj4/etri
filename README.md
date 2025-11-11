@@ -37,25 +37,31 @@ source .venv/bin/activate
 pip install flask pillow pycocotools openai
 ```
 
-### 2. OpenAI API 키 설정
 
-`config.py.example` 파일을 복사하여 `config.py`로 이름을 변경하고 API 키를 입력하세요:
+### 2. API 키 설정
 
-```bash
-# Windows
-copy config.py.example config.py
-
-# Linux/Mac
-cp config.py.example config.py
-```
-
-그 다음 `config.py` 파일을 열어 API 키를 입력:
+`config.py` 파일을 열어 OpenAI API 키를 입력하세요:
 
 ```python
-OPENAI_API_KEY = "your-api-key-here"
+# OpenAI API Key (필수)
+OPENAI_API_KEY = "your-openai-api-key-here"
+
+# 기본 모델 선택: "openai" (현재 OpenAI만 지원)
+DEFAULT_MODEL = "openai"
+
+# 관리자 설정
+ADMIN_NAMES = ["전요한", "홍지우", "박남준"]  # 관리자 이름 목록
+ADMIN_PASSWORD = "admin2025"  # 관리자 비밀번호 (변경 권장)
+
+# Google Drive 설정 (선택사항)
+GOOGLE_DRIVE_FOLDER_ID = "your-folder-id"  # Google Drive 폴더 ID
+GOOGLE_CREDENTIALS_PATH = "credentials.json"  # 서비스 계정 JSON 키 파일 경로
 ```
 
-**참고**: `config.py`는 `.gitignore`에 포함되어 Git에 업로드되지 않습니다.
+**참고**: 
+- `config.py`는 `.gitignore`에 포함되어 Git에 업로드되지 않습니다.
+- OpenAI API 키는 필수입니다.
+- Google Drive 연동은 선택사항입니다.
 
 ### 3. 서버 실행
 
@@ -113,6 +119,10 @@ python coco_web_annotator.py \
 etri_annotation_tool/
 ├── coco_web_annotator.py      # Flask 웹 애플리케이션 (메인)
 ├── annotation_utils.py         # 어노테이션 유틸리티 스크립트
+├── worker_management.py      # 작업자 관리 시스템 (API 라우트 포함)
+├── batch_process_with_save.py # 배치 처리 스크립트
+├── assign_images_to_workers.py # 이미지 할당 유틸리티
+├── config.py                  # 설정 파일 (API 키, 관리자 정보 등)
 ├── exo_data_sample.json       # 출력 형식 샘플
 ├── README.md                  # 이 파일
 ├── mscoco/
@@ -122,7 +132,8 @@ etri_annotation_tool/
 │   ├── web_annotations_exo.json   # Exo 어노테이션 출력 파일
 │   └── web_annotations_ego.json  # Ego 어노테이션 출력 파일
 └── templates/
-    └── index.html             # 웹 인터페이스 템플릿
+    ├── index.html             # 웹 인터페이스 템플릿
+    └── admin.html             # 관리자 페이지 템플릿
 ```
 
 `templates/index.html` 파일은 서버 최초 실행 시 자동으로 생성됩니다. 커스터마이징한 템플릿을 덮어쓰지 않으려면 생성된 파일을 버전 관리하거나 별도로 백업해 두세요.
@@ -153,11 +164,12 @@ etri_annotation_tool/
 - **왼쪽 패널**: 한글 입력 (Question, Choices, Rationale)
 - **오른쪽 패널**: 영어 출력 및 어노테이션 관리
 
-### 2. 자동 번역 기능
-- **GPT-4o-mini 기반 번역**: 한글 질문과 선택지를 영어로 자동 번역
-- **이미지 분석 통합**: 이미지 컨텍스트를 활용한 정확한 번역
+### 2. 자동 번역 및 QA 생성 기능
+- **GPT-4o 기반 이미지 분석**: 이미지 분석 후 QA 자동 생성
+- **GPT-4o 기반 번역**: 한글 질문과 선택지를 영어로 자동 번역
 - **태그 자동 생성**: `<ATT>`, `<POS>`, `<REL>` 태그 자동 포함
 - **한글 근거 자동 생성**: 선택된 답안을 바탕으로 한글 근거 자동 생성
+- **단일 이미지 QA 생성**: 이미지를 불러와서 질문과 답변을 자동으로 생성
 
 ### 3. Exo/Ego 분리
 - 이미지를 `exo_images`와 `ego_images` 폴더로 자동 분류
@@ -165,13 +177,31 @@ etri_annotation_tool/
 
 ### 4. Bounding Box 관리
 - 인터랙티브한 bbox 선택/해제
+- **직접 bbox 그리기**: Draw Bbox 모드로 이미지에 직접 bbox 그리기
 - 시각적 피드백 제공
 - 단축키로 빠른 토글 (Ctrl+X)
+- Delete 키로 선택된 bbox 삭제
 
 ### 5. 자동 저장
 - 30초마다 자동 저장
 - 페이지 종료 시 자동 저장
 - 마지막 작업 이미지 기억
+
+### 6. 작업자 관리 시스템
+- **작업자 로그인**: 작업자 ID와 이름으로 로그인
+- **이미지 할당**: 관리자가 작업자에게 이미지 할당
+- **진행 상황 추적**: 작업 완료 자동 체크 및 진행률 표시
+- **통계 및 리포트**: 작업자별 시간당/일일 작업 통계 생성
+- **Google Drive 연동**: 스프레드시트 자동 업로드 (선택사항)
+
+### 7. 관리자 기능
+- **관리자 로그인**: 관리자 이름과 비밀번호로 로그인
+- **관리자 페이지**: 웹 UI에서 모든 작업 관리
+  - 작업자 목록 조회
+  - 이미지 할당 (직접 입력, 범위 지정, 파일 업로드)
+  - 작업 진행 상황 모니터링
+  - 통계 및 리포트 생성
+- **보안**: 작업자에게는 관리자 기능 숨김
 
 ## 📖 사용법
 
@@ -183,14 +213,18 @@ etri_annotation_tool/
    - 정답 선택 (라디오 버튼)
    - Rationale (한글) 텍스트 영역에 근거 입력
 
-2. **번역 실행**
-   - Choices 아래 "번역" 버튼 클릭
-   - 이미지 분석 → 질문/선택지 번역 → 한글 근거 자동 생성
+2. **QA 자동 생성 또는 번역 실행**
+   - **QA 자동 생성**: "질문 자동 생성" 버튼 클릭
+     - 이미지 분석 (GPT-4o) → 질문/선택지 자동 생성 → 한글 근거 자동 생성
+   - **수동 번역**: Choices 아래 "번역" 버튼 클릭
+     - 이미지 분석 → 질문/선택지 번역 → 한글 근거 자동 생성
    - Rationale (한글) 아래 "번역" 버튼 클릭하여 영어 근거 생성
 
-3. **Bounding Box 선택**
+3. **Bounding Box 선택 및 직접 그리기**
    - 이미지에서 bbox 클릭하여 선택/해제
+   - **Draw Bbox 모드**: "Draw Bbox" 버튼 클릭 후 이미지에서 드래그하여 직접 bbox 그리기
    - Ctrl+X로 bbox 표시/숨김 토글
+   - Delete 키로 선택된 bbox 삭제
 
 4. **View 타입 선택**
    - Exo 또는 Ego 라디오 버튼 선택 (이미지 폴더에 따라 자동 설정)
@@ -330,10 +364,74 @@ python annotation_utils.py organize_images \
 - `POST /api/translate/question`, `/api/translate/choices`, `/api/translate/question_and_choices`: 한글 질문·선택지를 영어 포맷으로 변환
 - `POST /api/translate/rationale`: 한글 근거를 영어 소거법 형식으로 변환
 - `POST /api/review_translation`: 번역문 문법 검수 및 수정 제안
-- `POST /api/save`: bbox와 번역 결과를 저장
+- `POST /api/save`: bbox와 번역 결과를 저장 (작업자 ID 포함)
 - `GET /api/find/<image_id>`: COCO `image_id`로 데이터셋 인덱스 조회
+- `POST /api/admin/login`: 관리자 로그인 인증
+- `GET /api/workers`: 작업자 목록 조회
+- `POST /api/workers`: 작업자 추가
+- `POST /api/workers/<worker_id>/assign`: 작업자에게 이미지 할당
+- `GET /api/workers/<worker_id>/progress`: 작업자 진행 상황 조회
+- `GET /api/workers/<worker_id>/stats`: 작업자 통계 조회
+- `GET /api/workers/export`: 통계 스프레드시트 내보내기
 
 번역·분석 관련 엔드포인트는 OpenAI API 키가 설정되지 않으면 500 에러를 반환하므로, 자동화 시 예외 처리가 필요합니다.
+
+## 👥 작업자 관리 시스템
+
+### 작업자 로그인
+1. 웹 인터페이스 접속 시 로그인 화면 표시
+2. 작업자 ID와 이름 입력
+3. 로그인 후 작업 시작 (자동으로 작업 완료 추적)
+
+### 관리자 로그인
+1. 로그인 화면에서 "관리자" 탭 클릭
+2. 관리자 이름 입력 (전요한, 홍지우, 박남준)
+3. 비밀번호 입력 (`config.py`에서 설정)
+4. 관리자 페이지로 자동 이동
+
+### 관리자 페이지 기능
+- **작업자 목록**: 등록된 모든 작업자 확인
+- **이미지 할당**: 
+  - 직접 입력: 쉼표로 구분된 이미지 ID
+  - 범위 지정: 시작 ID ~ 끝 ID
+  - 파일 업로드: 텍스트 파일에서 이미지 ID 읽기
+- **진행 상황 모니터링**: 실시간 작업 진행률 확인
+- **통계 및 리포트**: 
+  - 일일 요약 리포트
+  - 상세 통계 (시간당 작업량)
+  - Google Drive 자동 업로드 (설정 시)
+
+### Google Drive 연동 설정
+`config.py`에 다음 설정 추가:
+```python
+GOOGLE_DRIVE_FOLDER_ID = "your-folder-id"
+GOOGLE_CREDENTIALS_PATH = "credentials.json"
+```
+
+Google Drive API 설정 방법:
+1. Google Cloud Console에서 서비스 계정 생성
+2. JSON 키 파일 다운로드
+3. `credentials.json`으로 저장
+4. Google Drive 폴더 ID 설정
+
+## 🔄 배치 처리
+
+대량 이미지에 대한 QA 자동 생성이 가능합니다:
+
+```bash
+# 배치 처리 스크립트 실행
+python batch_process_with_save.py \
+    --start_index 0 \
+    --end_index 100 \
+    --parallel 3 \
+    --output_json ./mscoco/web_annotations.json
+```
+
+옵션:
+- `--start_index`: 시작 인덱스
+- `--end_index`: 끝 인덱스
+- `--parallel`: 병렬 처리 수 (기본값: 3)
+- `--output_json`: 출력 JSON 파일 경로
 
 ## 📝 참고사항
 
@@ -341,6 +439,8 @@ python annotation_utils.py organize_images \
 - Exo 이미지는 `web_annotations_exo.json`에, Ego 이미지는 `web_annotations_ego.json`에 저장됩니다
 - 같은 `image_id`가 이미 존재하면 덮어쓰기됩니다 (중복 방지)
 - 번역 기능은 GPT-4o-mini를 사용하며, 이미지 분석을 통해 더 정확한 번역을 제공합니다
+- 작업자 관리 시스템은 `worker_management.py`를 통해 동작하며, 작업자 정보는 `workers.json`에 저장됩니다
+- 관리자 비밀번호는 `config.py`의 `ADMIN_PASSWORD`에서 변경할 수 있습니다
 
 ## 📄 라이선스
 

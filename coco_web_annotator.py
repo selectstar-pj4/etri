@@ -18,29 +18,54 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+
+
 import re
+
+# 작업자 관리 시스템 import
+try:
+    from worker_management import WorkerManager
+    WORKER_MANAGEMENT_AVAILABLE = True
+except ImportError:
+    WORKER_MANAGEMENT_AVAILABLE = False
+    print("[WARN] Worker management system not available. Install worker_management.py")
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
-# OpenAI API Key (config.py에서 로드, 없으면 환경변수 또는 기본값 사용)
+# API Keys (config.py에서 로드, 없으면 환경변수 또는 기본값 사용)
 try:
-    from config import OPENAI_API_KEY
+    from config import (
+        OPENAI_API_KEY,
+        DEFAULT_MODEL,
+        ADMIN_NAMES,
+        ADMIN_PASSWORD
+    )
 except ImportError:
     import os
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-    if not OPENAI_API_KEY:
-        print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
+    DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'openai')
+    ADMIN_NAMES = os.getenv('ADMIN_NAMES', '전요한,홍지우,박남준').split(',')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin2024')
+
+# 경고 메시지 출력
+if not OPENAI_API_KEY:
+    print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
 
 class COCOWebAnnotator:
     """Web-based COCO annotation tool for creating question-response pairs."""
     
-    def __init__(self, mscoco_folder, coco_json_path, output_json_path, categories_json_path=None):
+    def __init__(self, mscoco_folder, coco_json_path, output_json_path, categories_json_path=None, test_folder=None):
         # mscoco 폴더 경로 (exo_images와 ego_images가 있는 폴더)
         self.mscoco_folder = mscoco_folder
-        self.exo_images_folder = os.path.join(mscoco_folder, 'exo_images')
-        self.ego_images_folder = os.path.join(mscoco_folder, 'ego_images')
+        # 테스트 폴더가 지정되면 사용, 아니면 기본 폴더 사용
+        if test_folder:
+            self.exo_images_folder = os.path.join(mscoco_folder, test_folder)
+            self.ego_images_folder = os.path.join(mscoco_folder, 'ego_images')  # 테스트 시에도 ego는 기본 폴더
+        else:
+            self.exo_images_folder = os.path.join(mscoco_folder, 'exo_images')
+            self.ego_images_folder = os.path.join(mscoco_folder, 'ego_images')
         self.coco_json_path = coco_json_path
         # output_json_path를 exo/ego로 분리
         output_dir = os.path.dirname(output_json_path) if os.path.dirname(output_json_path) else '.'
@@ -185,6 +210,25 @@ annotator = None
 # 이미지 분석 결과 캐시 (image_id를 키로 사용)
 image_analysis_cache = {}
 
+# 작업자 관리 시스템 (전역 인스턴스)
+worker_manager = None
+if WORKER_MANAGEMENT_AVAILABLE:
+    try:
+        # Google Drive 설정 로드
+        try:
+            from config import GOOGLE_DRIVE_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
+        except ImportError:
+            GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID', None)
+            GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', None)
+        
+        worker_manager = WorkerManager(
+            google_drive_folder_id=GOOGLE_DRIVE_FOLDER_ID,
+            google_credentials_path=GOOGLE_CREDENTIALS_PATH
+        )
+    except Exception as e:
+        print(f"[WARN] Failed to initialize WorkerManager: {e}")
+        worker_manager = None
+
 # idx 검색 라우트 추가 #
 @app.route('/api/find/<int:image_id>')
 def find_by_image_id(image_id):
@@ -206,6 +250,45 @@ def index():
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+@app.route('/admin')
+def admin():
+    """Render the admin interface for worker management."""
+    # 관리자 인증은 프론트엔드에서 처리 (localStorage 기반)
+    # 추가 보안이 필요하면 세션 기반 인증으로 변경 가능
+    response = make_response(render_template('admin.html'))
+    # 브라우저 캐시 방지
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    """관리자 로그인 인증"""
+    data = request.json
+    admin_name = data.get('admin_name', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not admin_name or not password:
+        return jsonify({'success': False, 'error': '관리자 이름과 비밀번호를 입력해주세요.'}), 400
+    
+    # 관리자 이름 확인
+    if admin_name not in ADMIN_NAMES:
+        return jsonify({'success': False, 'error': '올바른 관리자 이름이 아닙니다.'}), 401
+    
+    # 비밀번호 확인
+    if password != ADMIN_PASSWORD:
+        return jsonify({'success': False, 'error': '비밀번호가 올바르지 않습니다.'}), 401
+    
+    return jsonify({'success': True, 'admin_name': admin_name})
+
+@app.route('/api/admin/check', methods=['GET'])
+def admin_check():
+    """관리자 인증 상태 확인 (프론트엔드에서 사용)"""
+    # 실제로는 세션 또는 토큰 기반 인증이 필요하지만,
+    # 현재는 프론트엔드의 localStorage를 신뢰
+    return jsonify({'success': True, 'message': 'Admin check endpoint'})
 
 @app.route('/api/image/<int:index>')
 def get_image(index):
@@ -489,31 +572,82 @@ Return only the formatted <choice> tag with translations."""
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+def analyze_image_with_model(image_base64, model='openai', image_path=None):
+    """이미지 분석을 모델별로 수행하는 헬퍼 함수"""
+    analysis_prompt = """Analyze this image in detail and extract specific visual features. Focus on:
+
+1. **Objects with detailed attributes**: 
+   - Color (e.g., "yellow cup", "red chair", "blue bag")
+   - Size/shape (e.g., "large square table", "small round plate")
+   - Material/texture (e.g., "wooden shelf", "glass window", "metal door")
+
+2. **Spatial relationships and positions**:
+   - Location (e.g., "book on the shelf", "cup on the table", "person in the corner")
+   - Relative positions (e.g., "left side of the image", "center of the room", "right edge")
+   - Orientation (e.g., "person facing right", "door opening left", "chair tilted")
+
+3. **Detailed object descriptions**:
+   - Specific features (e.g., "person wearing glasses", "book with red cover", "chair with armrests")
+   - States/conditions (e.g., "open door", "closed window", "empty cup")
+   - Interactions (e.g., "person holding cup", "book placed on shelf")
+
+4. **Spatial context**:
+   - Room/space type (e.g., "kitchen", "living room", "office")
+   - Layout information (e.g., "countertop in center", "refrigerator on left side")
+   - Distance relationships (e.g., "closest to camera", "farthest from door")
+
+Provide a comprehensive but concise description that captures these detailed visual features. Format the output as structured text that can be used to understand spatial relationships and object attributes for VQA (Visual Question Answering) tasks."""
+    
+    if model == 'openai' or model == 'gpt':
+        if not OPENAI_AVAILABLE:
+            raise Exception('OpenAI library not installed. Install with: pip install openai')
+        if not OPENAI_API_KEY:
+            raise Exception('OPENAI_API_KEY is not set')
+        
+        
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": analysis_prompt
+                }, {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+                }]
+            }],
+            temperature=0.3,
+            max_tokens=1000
+        )
+        return response.choices[0].message.content.strip()
+    
+    else:
+        raise Exception(f'Unknown model: {model}. Only "openai" or "gpt" is supported.')
+
 @app.route('/api/analyze_image/<int:index>', methods=['GET'])
 def analyze_image(index):
-    """Analyze image using GPT-5 vision to extract detailed features."""
+    """Analyze image using GPT-4o to extract detailed features."""
     if index >= len(annotator.image_ids):
         return jsonify({'error': 'Invalid index'}), 400
     
     image_id = annotator.image_ids[index]
+    model = request.args.get('model', DEFAULT_MODEL).lower()
     
-    # 캐시 확인
-    if image_id in image_analysis_cache:
+    # 캐시 확인 (모델별 캐시 키)
+    cache_key = f"{image_id}_{model}"
+    if cache_key in image_analysis_cache:
         return jsonify({
             'success': True,
             'image_id': image_id,
-            'analysis': image_analysis_cache[image_id],
-            'cached': True
+            'analysis': image_analysis_cache[cache_key],
+            'cached': True,
+            'model': model
         })
     
     try:
-        if not OPENAI_AVAILABLE:
-            return jsonify({'success': False, 'error': 'OpenAI library not installed. Install with: pip install openai'}), 500
-        
-        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-api-key-here":
-            return jsonify({'success': False, 'error': 'OPENAI_API_KEY is not set. Please set it in coco_web_annotator.py'}), 500
-        
-        client = OpenAI(api_key=OPENAI_API_KEY)
         
         # 이미지 로드 및 base64 변환
         image_info = annotator.coco.imgs[image_id]
@@ -559,64 +693,18 @@ def analyze_image(index):
             img.save(buffer, format='JPEG', quality=85)
             img_base64 = base64.b64encode(buffer.getvalue()).decode()
         
-        # 이미지 분석 프롬프트 (세부 특징 추출)
-        analysis_prompt = """Analyze this image in detail and extract specific visual features. Focus on:
-
-1. **Objects with detailed attributes**: 
-   - Color (e.g., "yellow cup", "red chair", "blue bag")
-   - Size/shape (e.g., "large square table", "small round plate")
-   - Material/texture (e.g., "wooden shelf", "glass window", "metal door")
-
-2. **Spatial relationships and positions**:
-   - Location (e.g., "book on the shelf", "cup on the table", "person in the corner")
-   - Relative positions (e.g., "left side of the image", "center of the room", "right edge")
-   - Orientation (e.g., "person facing right", "door opening left", "chair tilted")
-
-3. **Detailed object descriptions**:
-   - Specific features (e.g., "person wearing glasses", "book with red cover", "chair with armrests")
-   - States/conditions (e.g., "open door", "closed window", "empty cup")
-   - Interactions (e.g., "person holding cup", "book placed on shelf")
-
-4. **Spatial context**:
-   - Room/space type (e.g., "kitchen", "living room", "office")
-   - Layout information (e.g., "countertop in center", "refrigerator on left side")
-   - Distance relationships (e.g., "closest to camera", "farthest from door")
-
-Provide a comprehensive but concise description that captures these detailed visual features. Format the output as structured text that can be used to understand spatial relationships and object attributes for VQA (Visual Question Answering) tasks."""
+        # 모델별 이미지 분석 수행 (CLIP-2 통합 지원)
+        analysis_result = analyze_image_with_model(img_base64, model, image_path)
         
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": analysis_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{img_base64}"
-                            }
-                        }
-                    ]
-                }
-            ],
-            temperature=0.3,
-            max_tokens=1000
-        )
-        
-        analysis_result = response.choices[0].message.content.strip()
-        
-        # 캐시에 저장
-        image_analysis_cache[image_id] = analysis_result
+        # 캐시에 저장 (모델별 키 사용)
+        image_analysis_cache[cache_key] = analysis_result
         
         return jsonify({
             'success': True,
             'image_id': image_id,
             'analysis': analysis_result,
-            'cached': False
+            'cached': False,
+            'model': model
         })
         
     except Exception as e:
@@ -624,33 +712,27 @@ Provide a comprehensive but concise description that captures these detailed vis
 
 @app.route('/api/generate_question_and_choices', methods=['POST'])
 def generate_question_and_choices():
-    """Generate Korean question and choices using GPT-4o, after image analysis with GPT-4o-mini."""
+    """Generate Korean question and choices using GPT-4o, after image analysis with GPT-4o."""
     data = request.json
     image_id = data.get('image_id', None)
     index = data.get('index', None)
+    model = data.get('model', DEFAULT_MODEL).lower()  # 모델 선택 파라미터 추가
     
     if image_id is None and index is None:
         return jsonify({'success': False, 'error': 'image_id or index is required'}), 400
     
     try:
-        if not OPENAI_AVAILABLE:
-            return jsonify({'success': False, 'error': 'OpenAI library not installed. Install with: pip install openai'}), 500
-        
-        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-api-key-here":
-            return jsonify({'success': False, 'error': 'OPENAI_API_KEY is not set. Please set it in coco_web_annotator.py'}), 500
-        
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        
         # image_id가 없으면 index로 찾기
         if image_id is None:
             if index >= len(annotator.image_ids):
                 return jsonify({'error': 'Invalid index'}), 400
             image_id = annotator.image_ids[index]
         
-        # 1단계: 이미지 분석 (GPT-4o-mini) - 캐시 확인 또는 실행
+        # 1단계: 이미지 분석 (선택한 모델 사용) - 캐시 확인 또는 실행
         image_analysis = ""
-        if image_id in image_analysis_cache:
-            image_analysis = image_analysis_cache[image_id]
+        cache_key = f"{image_id}_{model}"
+        if cache_key in image_analysis_cache:
+            image_analysis = image_analysis_cache[cache_key]
         else:
             # 이미지 분석 API 호출 (캐시에 없으면 실행)
             # index 찾기
@@ -703,55 +785,9 @@ def generate_question_and_choices():
                 img.save(buffer, format='JPEG', quality=85)
                 img_base64 = base64.b64encode(buffer.getvalue()).decode()
             
-            analysis_prompt = """Analyze this image in detail and extract specific visual features. Focus on:
-
-1. **Objects with detailed attributes**: 
-   - Color (e.g., "yellow cup", "red chair", "blue bag")
-   - Size/shape (e.g., "large square table", "small round plate")
-   - Material/texture (e.g., "wooden shelf", "glass window", "metal door")
-
-2. **Spatial relationships and positions**:
-   - Location (e.g., "book on the shelf", "cup on the table", "person in the corner")
-   - Relative positions (e.g., "left side of the image", "center of the room", "right edge")
-   - Orientation (e.g., "person facing right", "door opening left", "chair tilted")
-
-3. **Detailed object descriptions**:
-   - Specific features (e.g., "person wearing glasses", "book with red cover", "chair with armrests")
-   - States/conditions (e.g., "open door", "closed window", "empty cup")
-   - Interactions (e.g., "person holding cup", "book placed on shelf")
-
-4. **Spatial context**:
-   - Room/space type (e.g., "kitchen", "living room", "office")
-   - Layout information (e.g., "countertop in center", "refrigerator on left side")
-   - Distance relationships (e.g., "closest to camera", "farthest from door")
-
-Provide a comprehensive but concise description that captures these detailed visual features. Format the output as structured text that can be used to understand spatial relationships and object attributes for VQA (Visual Question Answering) tasks."""
-            
-            analysis_response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": analysis_prompt
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_base64}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                temperature=0.3,
-                max_tokens=1000
-            )
-            
-            image_analysis = analysis_response.choices[0].message.content.strip()
-            image_analysis_cache[image_id] = image_analysis
+            # 이미지 분석 수행
+            image_analysis = analyze_image_with_model(img_base64, model, image_path)
+            image_analysis_cache[cache_key] = image_analysis
         
         # 2단계: COCO 어노테이션 정보 가져오기
         ann_ids = annotator.coco.getAnnIds(imgIds=image_id)
@@ -771,7 +807,14 @@ Provide a comprehensive but concise description that captures these detailed vis
         # 주요 객체 목록 생성
         main_objects = list(set([cat['category_name'] for cat in category_info if cat['category_name'] != 'unknown']))[:10]
         
-        # 3단계: 질문 생성 (GPT-4o)
+        # 3단계: 질문 생성 (GPT-4o 사용)
+        if not OPENAI_AVAILABLE:
+            return jsonify({'success': False, 'error': 'OpenAI library not installed. Install with: pip install openai'}), 500
+        
+        if not OPENAI_API_KEY or OPENAI_API_KEY == "your-api-key-here":
+            return jsonify({'success': False, 'error': 'OPENAI_API_KEY is not set. Please set it in config.py'}), 500
+        
+        client = OpenAI(api_key=OPENAI_API_KEY)
         # 3-hop 질문 생성: ATT, POS, REL이 모두 포함된 복잡한 질문
         question_generation_prompt = f"""이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 3-hop 질문을 한글로 생성해주세요.
 
@@ -989,15 +1032,15 @@ CRITICAL REQUIREMENTS - 3-HOP QUESTIONS:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a professional VQA question generator specializing in 3-hop questions with elimination method rationale support. CRITICAL REQUIREMENTS: 1) Each question MUST include ATT (attribute), POS (position), and REL (relationship) elements. 2) The correct answer MUST be an object with a bbox in the COCO annotations. 3) Multiple choice options MUST be designed for elimination method - each wrong answer should fail a different condition (location, color, attribute, distance, etc.) so they can be eliminated for different reasons. 4) Choices MUST be clearly distinguishable (use color, position, attributes like 'red cup', 'green t-shirt person', 'leftmost chair' when objects of the same type exist). 5) For POS (position), NEVER use vague expressions like 'in the center of the image' or 'on the left side of the image' - ALWAYS use specific object references like 'in the center of the table', 'on the left side of the sofa', 'to the right of the sink'. 6) CRITICAL - Position reversal rule: When generating questions, you MUST reverse left/right positions - if something is actually on the left, describe it as on the right in the question, and vice versa. 7) CRITICAL - Objective and specific expressions only: NEVER use subjective or abstract expressions like 'small', 'large', 'medium-sized', 'pretty', 'nice', 'beautiful' - ALWAYS use objective, measurable attributes like color ('red', 'blue', 'white'), shape ('round', 'square', 'rectangular'), material ('wood', 'glass', 'metal'), function ('edible', 'chair', 'table'), or specific location ('left', 'right', 'center' relative to specific objects). 8) CRITICAL - Question type restriction: NEVER generate questions asking about abstract properties like 'what color is it?', 'what type is it?', 'what kind is it?', 'what shape is it?' - ALWAYS ask about specific objects in the image (e.g., 'which object is...', 'what is...'). Questions must ask about concrete objects, not abstract attributes. 9) CRITICAL - Choices must only include objects that exist in the image: Each choice option MUST be an object that actually exists in the image according to the image analysis and COCO annotations. NEVER include objects that don't exist in the image as choice options. Verify each choice against the image analysis results and COCO object information. 10) Generate exactly 3 questions with different structures and combinations. 11) Always return valid JSON format."
+                    "content": "You are an expert VQA question generator. Generate accurate, concise 3-hop questions. CRITICAL: 1) Each question MUST include ATT (attribute), POS (position), REL (relationship). 2) Use ONLY objects that actually exist in the image. 3) Choices must be clearly distinguishable (use color, position: 'red cup', 'leftmost chair'). 4) For POS, use specific object references ('center of table', NOT 'center of image'). 5) Reverse left/right positions in questions. 6) Use ONLY objective attributes (color, shape, material) - NEVER subjective ('small', 'pretty'). 7) Ask about concrete objects, NOT abstract properties. 8) Generate exactly 3 questions with different structures. Return valid JSON."
                 },
                 {
                     "role": "user",
                     "content": question_generation_prompt
                 }
             ],
-            temperature=0.8,
-            max_tokens=2500,
+            temperature=0.5,  # 온도 낮춤: 더 일관된 결과 (0.8 -> 0.5)
+            max_tokens=2000,  # 토큰 수 감소: 더 빠른 처리 (2500 -> 2000)
             response_format={"type": "json_object"}
         )
         
@@ -1694,15 +1737,12 @@ def save_annotation():
     """Save annotation data to JSON file."""
     data = request.json
     
-    # Validation: Check required fields
-    required_fields = ['question', 'response', 'view', 'selected_bboxes']
+    # Validation: Check required fields (bbox는 선택사항)
+    required_fields = ['question', 'response', 'view']
     missing_fields = []
     
     for field in required_fields:
-        if field == 'selected_bboxes':
-            if not data.get(field) or len(data.get(field, [])) == 0:
-                missing_fields.append('bbox')
-        elif field == 'view':
+        if field == 'view':
             if not data.get(field) or data.get(field).strip() == '':
                 missing_fields.append('view')
         else:
@@ -1725,14 +1765,18 @@ def save_annotation():
     image_filename = image_info['file_name']
     relative_image_path = f"/{image_filename}"
     
-    # bbox 처리: 단일 bbox면 배열로 감싸지 않고 그대로, 여러 개면 배열 유지
-    selected_bboxes = data['selected_bboxes']
-    if len(selected_bboxes) == 1:
-        # 단일 bbox인 경우 배열로 감싸지 않고 직접 저장
-        bbox_value = selected_bboxes[0]
+    # bbox 처리: bbox가 있으면 처리, 없으면 None (선택사항)
+    selected_bboxes = data.get('selected_bboxes', [])
+    if selected_bboxes and len(selected_bboxes) > 0:
+        if len(selected_bboxes) == 1:
+            # 단일 bbox인 경우 배열로 감싸지 않고 직접 저장
+            bbox_value = selected_bboxes[0]
+        else:
+            # 여러 bbox인 경우 배열로 저장
+            bbox_value = selected_bboxes
     else:
-        # 여러 bbox인 경우 배열로 저장
-        bbox_value = selected_bboxes
+        # bbox가 없으면 None으로 저장
+        bbox_value = None
     
     annotation = {
         'image_id': data['image_id'],
@@ -1781,6 +1825,12 @@ def save_annotation():
     if not found:
         view_annotations.append(annotation)  # 새로 추가
     
+    # 작업자 관리: 작업 완료 체크 (worker_id가 제공된 경우)
+    global worker_manager
+    worker_id = data.get('worker_id')
+    if worker_manager and worker_id:
+        worker_manager.mark_completed(worker_id, image_id)
+    
     # Save to file
     try:
         # 출력 디렉토리 생성
@@ -1819,7 +1869,14 @@ def save_annotation():
         # 전체 annotations도 업데이트 (다음 로드 시 반영)
         annotator._reload_annotations()
         
-        return jsonify({'success': True, 'updated': found})
+        response_data = {'success': True, 'updated': found}
+        
+        # 작업자 관리: 작업 완료 정보 포함
+        if worker_manager and worker_id:
+            progress = worker_manager.get_worker_progress(worker_id)
+            response_data['worker_progress'] = progress
+        
+        return jsonify(response_data)
     except (IOError, OSError) as e:
         return jsonify({'error': f'Failed to save: {e}'}), 500
 
@@ -2300,6 +2357,8 @@ def main():
                         help='Port to run server on')
     parser.add_argument('--categories_json', default=None,
                         help='Path to custom categories JSON (list of {id,name})')
+    parser.add_argument('--test_folder', default=None,
+                        help='Test folder name (e.g., exo_test_image) to use instead of exo_images')
 
     
     args = parser.parse_args()
@@ -2309,11 +2368,16 @@ def main():
         print(f"Error: mscoco folder not found: {args.mscoco_folder}")
         return
     
-    exo_images_path = os.path.join(args.mscoco_folder, 'exo_images')
+    # 테스트 폴더가 지정되면 사용, 아니면 기본 폴더 확인
+    if args.test_folder:
+        exo_images_path = os.path.join(args.mscoco_folder, args.test_folder)
+        print(f"[INFO] Using test folder: {exo_images_path}")
+    else:
+        exo_images_path = os.path.join(args.mscoco_folder, 'exo_images')
     ego_images_path = os.path.join(args.mscoco_folder, 'ego_images')
     
     if not os.path.exists(exo_images_path):
-        print(f"Warning: exo_images folder not found: {exo_images_path}")
+        print(f"Warning: exo images folder not found: {exo_images_path}")
     if not os.path.exists(ego_images_path):
         print(f"Warning: ego_images folder not found: {ego_images_path}")
     
@@ -2329,17 +2393,27 @@ def main():
     # Initialize global annotator
     global annotator
     annotator = COCOWebAnnotator(args.mscoco_folder, args.coco_json, 
-                                 args.output_json, args.categories_json)
+                                 args.output_json, args.categories_json, 
+                                 test_folder=args.test_folder)
     
     # Create template
     create_template()
+    
+    # 작업자 관리 API 라우트 등록
+    if WORKER_MANAGEMENT_AVAILABLE:
+        from worker_management import register_worker_routes
+        register_worker_routes(app, worker_manager)
+        print("[INFO] Worker management system enabled")
+    else:
+        print("[WARN] Worker management system disabled")
     
     print(f"Starting web server at http://{args.host}:{args.port}")
     print("Access the annotation tool in your web browser")
     print(f"Exo annotations will be saved to: {annotator.output_json_path_exo}")
     print(f"Ego annotations will be saved to: {annotator.output_json_path_ego}")
     
-    app.run(host=args.host, port=args.port, debug=True)
+    # 멀티스레드 모드로 실행 (타임아웃 방지)
+    app.run(host=args.host, port=args.port, debug=True, threaded=True)
 
 
 if __name__ == "__main__":
