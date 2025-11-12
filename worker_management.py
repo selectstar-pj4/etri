@@ -57,39 +57,84 @@ class WorkerManager:
     
     def load_workers(self):
         """작업자 목록 로드"""
-        if os.path.exists(self.workers_file):
-            with open(self.workers_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
+        try:
+            if os.path.exists(self.workers_file):
+                with open(self.workers_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return []
+        except (OSError, PermissionError, IOError) as e:
+            print(f"[WARN] 작업자 목록 로드 실패: {self.workers_file}")
+            print(f"[WARN] 오류: {e}")
+            return []
     
     def save_workers(self):
         """작업자 목록 저장"""
-        with open(self.workers_file, 'w', encoding='utf-8') as f:
-            json.dump(self.workers, f, ensure_ascii=False, indent=2)
+        try:
+            # 디렉토리가 없으면 생성
+            dir_path = os.path.dirname(self.workers_file)
+            if dir_path and not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            
+            with open(self.workers_file, 'w', encoding='utf-8') as f:
+                json.dump(self.workers, f, ensure_ascii=False, indent=2)
+        except (OSError, PermissionError, IOError) as e:
+            print(f"[ERROR] 작업자 목록 저장 실패: {self.workers_file}")
+            print(f"[ERROR] 오류: {e}")
+            raise
     
     def load_assignments(self):
         """이미지 할당 정보 로드"""
-        if os.path.exists(self.assignments_file):
-            with open(self.assignments_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
+        try:
+            if os.path.exists(self.assignments_file):
+                with open(self.assignments_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except (OSError, PermissionError, IOError) as e:
+            print(f"[WARN] 할당 정보 로드 실패: {self.assignments_file}")
+            print(f"[WARN] 오류: {e}")
+            return {}
     
     def save_assignments(self):
         """이미지 할당 정보 저장"""
-        with open(self.assignments_file, 'w', encoding='utf-8') as f:
-            json.dump(self.assignments, f, ensure_ascii=False, indent=2)
+        try:
+            # 디렉토리가 없으면 생성
+            dir_path = os.path.dirname(self.assignments_file)
+            if dir_path and not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            
+            with open(self.assignments_file, 'w', encoding='utf-8') as f:
+                json.dump(self.assignments, f, ensure_ascii=False, indent=2)
+        except (OSError, PermissionError, IOError) as e:
+            print(f"[ERROR] 할당 정보 저장 실패: {self.assignments_file}")
+            print(f"[ERROR] 오류: {e}")
+            raise
     
     def load_stats(self):
         """통계 정보 로드"""
-        if os.path.exists(self.stats_file):
-            with open(self.stats_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
+        try:
+            if os.path.exists(self.stats_file):
+                with open(self.stats_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except (OSError, PermissionError, IOError) as e:
+            print(f"[WARN] 통계 정보 로드 실패: {self.stats_file}")
+            print(f"[WARN] 오류: {e}")
+            return {}
     
     def save_stats(self):
         """통계 정보 저장"""
-        with open(self.stats_file, 'w', encoding='utf-8') as f:
-            json.dump(self.stats, f, ensure_ascii=False, indent=2)
+        try:
+            # 디렉토리가 없으면 생성
+            dir_path = os.path.dirname(self.stats_file)
+            if dir_path and not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            
+            with open(self.stats_file, 'w', encoding='utf-8') as f:
+                json.dump(self.stats, f, ensure_ascii=False, indent=2)
+        except (OSError, PermissionError, IOError) as e:
+            print(f"[ERROR] 통계 정보 저장 실패: {self.stats_file}")
+            print(f"[ERROR] 오류: {e}")
+            raise
     
     def add_worker(self, worker_id, worker_name):
         """작업자 추가"""

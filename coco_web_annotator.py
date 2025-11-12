@@ -243,13 +243,46 @@ if WORKER_MANAGEMENT_AVAILABLE:
         # 공유 저장소 경로 설정
         if WORKER_DATA_DIR:
             import os
-            # 공유 저장소 디렉토리가 없으면 생성
-            if not os.path.exists(WORKER_DATA_DIR):
-                os.makedirs(WORKER_DATA_DIR, exist_ok=True)
-            # 공유 저장소 경로에 파일 경로 설정
-            workers_file = os.path.join(WORKER_DATA_DIR, 'workers.json')
-            assignments_file = os.path.join(WORKER_DATA_DIR, 'worker_assignments.json')
-            stats_file = os.path.join(WORKER_DATA_DIR, 'worker_stats.json')
+            # 공유 저장소 접근 가능 여부 확인
+            try:
+                # 공유 저장소 디렉토리가 없으면 생성 시도
+                if not os.path.exists(WORKER_DATA_DIR):
+                    try:
+                        os.makedirs(WORKER_DATA_DIR, exist_ok=True)
+                        print(f"[INFO] 공유 저장소 디렉토리 생성: {WORKER_DATA_DIR}")
+                    except (OSError, PermissionError) as e:
+                        print(f"[ERROR] 공유 저장소 디렉토리 생성 실패: {WORKER_DATA_DIR}")
+                        print(f"[ERROR] 오류 내용: {e}")
+                        print(f"[ERROR] 다음 사항을 확인하세요:")
+                        print(f"[ERROR] 1. 서버 컴퓨터(10.2.80.28)가 켜져 있고 같은 네트워크에 연결되어 있는지")
+                        print(f"[ERROR] 2. 공유 폴더가 제대로 공유되어 있는지")
+                        print(f"[ERROR] 3. 방화벽 설정이 올바른지")
+                        print(f"[ERROR] 4. 네트워크 경로가 올바른지: {WORKER_DATA_DIR}")
+                        raise
+                
+                # 접근 가능 여부 테스트 (읽기/쓰기)
+                test_file = os.path.join(WORKER_DATA_DIR, '.test_access')
+                try:
+                    with open(test_file, 'w') as f:
+                        f.write('test')
+                    os.remove(test_file)
+                    print(f"[INFO] 공유 저장소 접근 성공: {WORKER_DATA_DIR}")
+                except (OSError, PermissionError) as e:
+                    print(f"[ERROR] 공유 저장소 접근 실패: {WORKER_DATA_DIR}")
+                    print(f"[ERROR] 오류 내용: {e}")
+                    print(f"[ERROR] 공유 폴더에 읽기/쓰기 권한이 있는지 확인하세요.")
+                    raise
+                
+                # 공유 저장소 경로에 파일 경로 설정
+                workers_file = os.path.join(WORKER_DATA_DIR, 'workers.json')
+                assignments_file = os.path.join(WORKER_DATA_DIR, 'worker_assignments.json')
+                stats_file = os.path.join(WORKER_DATA_DIR, 'worker_stats.json')
+            except Exception as e:
+                print(f"[WARN] 공유 저장소 사용 불가, 로컬 디렉토리로 대체합니다.")
+                print(f"[WARN] 오류: {e}")
+                workers_file = 'workers.json'
+                assignments_file = 'worker_assignments.json'
+                stats_file = 'worker_stats.json'
         else:
             # 로컬 사용 (기본값)
             workers_file = 'workers.json'
