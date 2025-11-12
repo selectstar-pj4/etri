@@ -22,20 +22,50 @@ MS-COCO 데이터셋 이미지를 사용하여 Visual Question Answering (VQA) �
 1. [VSCode 공식 웹사이트](https://code.visualstudio.com/)에서 다운로드
 2. 설치 후 실행
 
-### 2. Python 설치 확인
+### 2. Python 설치
 
-**Windows:**
+**Python이 설치되어 있는지 확인:**
 ```powershell
 # PowerShell 또는 명령 프롬프트에서 실행
 python --version
 ```
 
 **설치되어 있지 않은 경우:**
-1. [Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.8 이상 다운로드
-2. 설치 시 **"Add Python to PATH"** 옵션 체크 필수
-3. 설치 후 터미널 재시작 후 다시 확인
 
-### 3. VSCode Python 확장 설치
+1. [Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.8 이상 다운로드
+2. **⚠️ 매우 중요: 설치 시 "Add Python to PATH" 옵션을 반드시 체크하세요!**
+   - 이 옵션을 체크하지 않으면 터미널에서 `python` 명령어를 사용할 수 없습니다
+   - 설치 화면에서 "Add Python to PATH" 체크박스를 반드시 선택해야 합니다
+3. 설치 완료 후 터미널을 완전히 종료하고 다시 열기
+4. 다시 확인:
+   ```powershell
+   python --version
+   ```
+
+**"Add Python to PATH"를 체크하지 않았거나 이미 설치한 경우:**
+- Python을 다시 설치하거나
+- 수동으로 PATH 환경 변수에 Python 경로를 추가해야 합니다
+
+### 3. Git 설치
+
+**Git이 설치되어 있는지 확인:**
+```powershell
+git --version
+```
+
+**설치되어 있지 않은 경우:**
+
+1. [Git 공식 웹사이트](https://git-scm.com/download/win)에서 Windows용 Git 다운로드
+2. 다운로드한 설치 파일 실행
+3. 설치 과정에서 기본 설정을 사용하면 됩니다 (Next 버튼 클릭)
+4. 설치 완료 후 터미널을 다시 열고 확인:
+   ```powershell
+   git --version
+   ```
+
+**참고:** Git은 프로젝트 코드를 다운로드하고 업데이트하는 데 필요합니다.
+
+### 4. VSCode Python 확장 설치
 
 1. VSCode 실행
 2. 확장 프로그램 아이콘 클릭 (왼쪽 사이드바) 또는 `Ctrl+Shift+X`
@@ -61,7 +91,7 @@ python --version
 
 ### 코드 업데이트 받기 (Git Pull)
 
-관리자가 코드를 수정할 때마다 다음 절차를 따르세요:
+코드를 업데이트할 때마다 다음 절차를 따르세요:
 
 #### ⚠️ 중요: Git Pull 전 확인 사항
 
@@ -70,9 +100,6 @@ python --version
 1. **작업 파일 (백업 권장)**
    - `mscoco/web_annotations_exo.json` - 작업한 어노테이션 파일
    - `mscoco/web_annotations_ego.json` - 작업한 어노테이션 파일
-   - `workers.json` - 작업자 정보
-   - `worker_assignments.json` - 이미지 할당 정보
-   - `worker_stats.json` - 작업 통계
 
 2. **설정 파일 (덮어쓰기 주의)**
    - `config.py` - API 키 및 설정 (덮어쓰이지 않지만 확인 권장)
@@ -163,18 +190,6 @@ pip list
 - pycocotools
 - openai
 
-**참고:** 가상환경을 사용하고 싶다면 다음 명령으로 생성할 수 있습니다 (선택사항):
-```powershell
-# 가상환경 생성
-python -m venv .venv
-
-# 가상환경 활성화 (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# 가상환경 활성화 (Command Prompt)
-.venv\Scripts\activate.bat
-```
-
 ### 2. API 키 설정
 
 1. 프로젝트 루트에 `config.py` 파일 생성 (없는 경우)
@@ -205,7 +220,6 @@ mscoco/
 │   └── *.jpg                     # 이미지 파일들
 ├── ego_images/                   # Ego 이미지 폴더 (선택사항)
 │   └── *.jpg                     # 이미지 파일들
-└── question_candidates_exo.json  # 질문 후보 파일 (선택사항)
 ```
 
 **참고:** 이 파일들은 용량이 크거나 Git에 포함되지 않으므로 로컬에서 직접 준비해야 합니다.
@@ -235,7 +249,7 @@ python coco_web_annotator.py `
 - `--mscoco_folder`: 이미지 폴더가 있는 루트 경로 (기본값: `./mscoco`)
 - `--coco_json`: COCO 어노테이션 JSON 파일 경로 (필수)
 - `--output_json`: 저장할 어노테이션 파일 이름 (필수, 실제로는 `_exo.json`, `_ego.json` 두 파일 생성)
-- `--test_folder`: 특정 폴더의 이미지만 로드 (선택사항, 관리자용)
+- `--test_folder`: 특정 폴더의 이미지만 로드 (선택사항)
 - `--categories_json`: 커스텀 카테고리 매핑 파일 (선택사항)
 - `--host`: 서버 호스트 (기본값: `0.0.0.0`)
 - `--port`: 서버 포트 (기본값: `5000`)
@@ -249,14 +263,7 @@ python coco_web_annotator.py `
 
 ## 📝 작업 방법
 
-### 1. 작업자 로그인
-
-1. 웹 인터페이스 접속 시 로그인 화면 표시
-2. **작업자 ID** 입력 (예: `worker001`)
-3. **작업자 이름** 입력 (예: `홍길동`)
-4. "로그인" 버튼 클릭
-
-### 2. 기본 워크플로우
+### 1. 기본 워크플로우
 
 #### Step 1: 이미지 로드
 
@@ -264,9 +271,6 @@ python coco_web_annotator.py `
 - **Ctrl+Left/Right Arrow**: 키보드로 이동
 - **Image ID 검색**: Image ID 입력 후 "Go" 버튼 클릭
 
-**자동 로드 기능:**
-- 이미지를 로드하면 `question_candidates_exo.json` 파일에서 해당 이미지의 질문과 선택지가 자동으로 로드됩니다
-- 기존 어노테이션이 있으면 그것이 우선 표시됩니다
 
 #### Step 2: 한글 입력 (왼쪽 패널)
 
@@ -313,8 +317,7 @@ python coco_web_annotator.py `
 ### 3. 번역 기능 사용
 
 **QA 자동 생성:**
-- 현재는 질문이 미리 생성되어 자동으로 로드됩니다
-- 필요시 수동으로 질문을 수정할 수 있습니다
+- 필요시 수동으로 질문을 입력할 수 있습니다
 
 **수동 번역:**
 - Choices 아래 "번역" 버튼: 질문과 선택지를 영어로 번역
@@ -322,37 +325,11 @@ python coco_web_annotator.py `
 
 ## 🛠️ 툴 사용법
 
-### 1. 이미지 할당 유틸리티 (명령줄)
-
-명령줄에서 작업자에게 이미지를 할당하는 유틸리티입니다.
-
-**사용법:**
-
-```powershell
-# 여러 작업자에게 이미지 균등 분배
-python assign_images_to_workers.py --workers worker001 worker002 worker003 --range 0 500
-
-# 파일에서 이미지 ID 읽어서 할당
-python assign_images_to_workers.py --workers worker001 worker002 --image_file image_ids.txt
-
-# 직접 이미지 ID 지정
-python assign_images_to_workers.py --workers worker001 --images 579446 579648 580026
-```
-
-**옵션:**
-- `--workers`: 작업자 ID 목록 (필수)
-- `--images`: 이미지 ID 목록
-- `--image_file`: 이미지 ID 목록이 있는 파일 경로
-- `--range`: 이미지 ID 범위 (예: `--range 0 100`)
-
 ## 📁 프로젝트 구조
 
 ```
 etri_annotation_tool/
 ├── coco_web_annotator.py      # Flask 웹 애플리케이션 (메인)
-├── generate_exo_questions.py  # 질문 생성 배치 스크립트
-├── worker_management.py      # 작업자 관리 시스템 (API 라우트 포함)
-├── assign_images_to_workers.py # 이미지 할당 유틸리티
 ├── config.py                  # 설정 파일 (API 키 등)
 ├── config.txt                 # config.py 생성용 템플릿 파일
 ├── exo_data_sample.json       # 출력 형식 샘플
@@ -361,7 +338,6 @@ etri_annotation_tool/
 │   ├── exo_images/            # Exo 이미지 폴더
 │   ├── ego_images/            # Ego 이미지 폴더
 │   ├── instances_train2017.json  # COCO 어노테이션 파일
-│   ├── question_candidates_exo.json # 질문 후보 파일 (선택사항)
 │   ├── web_annotations_exo.json   # Exo 어노테이션 출력 파일
 │   └── web_annotations_ego.json  # Ego 어노테이션 출력 파일
 └── templates/
@@ -374,11 +350,7 @@ etri_annotation_tool/
 - **왼쪽 패널**: 한글 입력 (Question, Choices, Rationale)
 - **오른쪽 패널**: 영어 출력 및 어노테이션 관리
 
-### 2. 자동 질문 로드
-- 이미지 로드 시 `question_candidates_exo.json`에서 질문과 선택지 자동 로드
-- 기존 어노테이션이 있으면 우선 표시
-
-### 3. GPT-4o 기반 번역
+### 2. GPT-4o 기반 번역
 - 한글 질문과 선택지를 영어로 자동 번역
 - 태그 자동 생성: `<ATT>`, `<POS>`, `<REL>` 태그 자동 포함
 - 한글 근거를 영어로 자동 번역
@@ -397,11 +369,6 @@ etri_annotation_tool/
 - 30초마다 자동 저장
 - 페이지 종료 시 자동 저장
 - 마지막 작업 이미지 기억
-
-### 7. 작업자 관리 시스템
-- 작업자 로그인 및 작업 추적
-- 진행 상황 모니터링
-- 통계 및 리포트 생성
 
 ## ⌨️ 키보드 단축키
 
@@ -508,20 +475,6 @@ python coco_web_annotator.py ... --port 5001
 - `--parallel` 옵션 값을 줄여서 실행 (예: `--parallel 3`)
 - 잠시 기다린 후 다시 시도
 
-### 7. 가상환경 활성화 오류 (PowerShell)
-
-**원인**: PowerShell 실행 정책 문제.
-
-**해결**:
-```powershell
-# PowerShell 실행 정책 변경 (현재 사용자만)
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-또는 Command Prompt 사용:
-```cmd
-.venv\Scripts\activate.bat
-```
 
 ## 📝 참고사항
 
@@ -529,8 +482,6 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 - Exo 이미지는 `web_annotations_exo.json`에, Ego 이미지는 `web_annotations_ego.json`에 저장됩니다
 - 같은 `image_id`가 이미 존재하면 덮어쓰기됩니다 (중복 방지)
 - 번역 기능은 GPT-4o를 사용하며, 이미지 분석을 통해 더 정확한 번역을 제공합니다
-- 작업자 관리 시스템은 `worker_management.py`를 통해 동작하며, 작업자 정보는 `workers.json`에 저장됩니다
-- `question_candidates_exo.json` 파일은 관리자가 질문 생성 스크립트로 미리 생성하여 제공합니다
 
 ## 📄 라이선스
 
