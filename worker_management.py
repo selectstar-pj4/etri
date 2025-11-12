@@ -122,20 +122,45 @@ class WorkerManager:
         return len(image_ids)
     
     def mark_completed(self, worker_id, image_id):
-        """이미지 작업 완료 표시"""
+        """이미지 작업 완료 표시 (할당이 없으면 자동으로 할당 후 완료 처리)"""
+        # 할당이 없으면 자동으로 할당
         if worker_id not in self.assignments:
-            return False
+            self.assignments[worker_id] = []
         
+        # 이미 할당된 이미지인지 확인
+        assignment_found = False
         for assignment in self.assignments[worker_id]:
-            if assignment['image_id'] == image_id and assignment['status'] != 'completed':
-                assignment['status'] = 'completed'
-                assignment['completed_at'] = datetime.now().isoformat()
-                
-                # 통계 업데이트
-                self.update_stats(worker_id, image_id, assignment['assigned_at'])
-                
-                self.save_assignments()
-                return True
+            if assignment['image_id'] == image_id:
+                assignment_found = True
+                if assignment['status'] != 'completed':
+                    assignment['status'] = 'completed'
+                    assignment['completed_at'] = datetime.now().isoformat()
+                    
+                    # 통계 업데이트
+                    self.update_stats(worker_id, image_id, assignment.get('assigned_at', datetime.now().isoformat()))
+                    
+                    self.save_assignments()
+                    return True
+                else:
+                    # 이미 완료된 경우 통계만 업데이트 (중복 방지)
+                    return True
+        
+        # 할당이 없으면 자동으로 할당 후 완료 처리
+        if not assignment_found:
+            assignment = {
+                'image_id': image_id,
+                'assigned_at': datetime.now().isoformat(),
+                'status': 'completed',
+                'completed_at': datetime.now().isoformat(),
+                'worker_id': worker_id
+            }
+            self.assignments[worker_id].append(assignment)
+            
+            # 통계 업데이트
+            self.update_stats(worker_id, image_id, assignment['assigned_at'])
+            
+            self.save_assignments()
+            return True
         
         return False
     
@@ -166,13 +191,17 @@ class WorkerManager:
         self.save_stats()
     
     def get_worker_progress(self, worker_id):
-        """작업자 진행 상황 조회"""
+        """작업자 진행 상황 조회 (할당 정보를 실시간으로 다시 로드)"""
+        # 할당 정보를 파일에서 다시 로드
+        self.assignments = self.load_assignments()
+        
         if worker_id not in self.assignments:
             return {
                 'assigned': 0,
                 'in_progress': 0,
                 'completed': 0,
-                'total': 0
+                'total': 0,
+                'completion_rate': 0
             }
         
         assigned = len(self.assignments[worker_id])
@@ -188,7 +217,10 @@ class WorkerManager:
         }
     
     def get_worker_stats(self, worker_id, date=None):
-        """작업자 통계 조회"""
+        """작업자 통계 조회 (통계 정보를 실시간으로 다시 로드)"""
+        # 통계 정보를 파일에서 다시 로드
+        self.stats = self.load_stats()
+        
         if worker_id not in self.stats:
             return {
                 'total_completed': 0,
@@ -310,9 +342,10 @@ def register_worker_routes(app, worker_manager):
     
     @app.route('/api/workers', methods=['GET'])
     def get_workers():
-        """작업자 목록 조회"""
-        workers = worker_manager.workers
-        return jsonify({'success': True, 'workers': workers})
+        """작업자 목록 조회 (실시간으로 파일에서 다시 로드)"""
+        # 파일에서 최신 작업자 목록 다시 로드
+        worker_manager.workers = worker_manager.load_workers()
+        return jsonify({'success': True, 'workers': worker_manager.workers})
     
     @app.route('/api/workers', methods=['POST'])
     def add_worker():
@@ -343,18 +376,6 @@ def register_worker_routes(app, worker_manager):
             worker = worker_manager.add_worker(worker_id, worker_name)
             return jsonify({'success': True, 'worker': worker, 'is_new': True})
     
-    @app.route('/api/workers/<worker_id>/assign', methods=['POST'])
-    def assign_images_to_worker(worker_id):
-        """작업자에게 이미지 할당"""
-        data = request.json
-        image_ids = data.get('image_ids', [])
-        
-        if not image_ids:
-            return jsonify({'success': False, 'error': 'image_ids are required'}), 400
-        
-        count = worker_manager.assign_images(worker_id, image_ids)
-        return jsonify({'success': True, 'assigned_count': count})
-    
     @app.route('/api/workers/<worker_id>/progress', methods=['GET'])
     def get_worker_progress(worker_id):
         """작업자 진행 상황 조회"""
@@ -367,15 +388,6 @@ def register_worker_routes(app, worker_manager):
         date = request.args.get('date')  # YYYY-MM-DD 형식
         stats = worker_manager.get_worker_stats(worker_id, date)
         return jsonify({'success': True, 'stats': stats})
-    
-    @app.route('/api/workers/<worker_id>/assignments', methods=['GET'])
-    def get_worker_assignments(worker_id):
-        """작업자에게 할당된 이미지 목록 조회"""
-        if worker_id not in worker_manager.assignments:
-            return jsonify({'success': True, 'assignments': []})
-        
-        assignments = worker_manager.assignments[worker_id]
-        return jsonify({'success': True, 'assignments': assignments})
     
     @app.route('/api/workers/export', methods=['GET'])
     def export_worker_stats():

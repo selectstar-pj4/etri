@@ -202,43 +202,6 @@
             <button onclick="loadWorkers()" class="secondary">새로고침</button>
         </div>
         
-        <!-- 이미지 할당 -->
-        <div class="section">
-            <h2>📦 이미지 할당</h2>
-            <div class="form-group">
-                <label>작업자 선택:</label>
-                <select id="assignWorkerSelect">
-                    <option value="">작업자를 선택하세요</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>이미지 ID 입력 방법:</label>
-                <select id="assignMethod" onchange="toggleAssignMethod()">
-                    <option value="manual">직접 입력</option>
-                    <option value="range">범위 지정</option>
-                    <option value="file">파일에서 읽기</option>
-                </select>
-            </div>
-            <div id="assignManual" class="form-group">
-                <label>이미지 ID (쉼표로 구분):</label>
-                <textarea id="assignImageIds" rows="3" placeholder="예: 579446, 579648, 580026"></textarea>
-            </div>
-            <div id="assignRange" class="form-group" style="display: none;">
-                <label>이미지 ID 범위:</label>
-                <div style="display: flex; gap: 10px;">
-                    <input type="number" id="assignRangeStart" placeholder="시작 ID" style="flex: 1;">
-                    <span style="line-height: 40px;">~</span>
-                    <input type="number" id="assignRangeEnd" placeholder="끝 ID" style="flex: 1;">
-                </div>
-            </div>
-            <div id="assignFile" class="form-group" style="display: none;">
-                <label>이미지 ID 파일 (한 줄에 하나씩):</label>
-                <input type="file" id="assignFileInput" accept=".txt,.csv">
-            </div>
-            <button onclick="assignImages()">이미지 할당</button>
-            <div id="assignMessage"></div>
-        </div>
-        
         <!-- 작업 진행 상황 -->
         <div class="section">
             <h2>📊 작업 진행 상황</h2>
@@ -322,6 +285,44 @@
             }
         }
         
+        // 자동 새로고침 간격 (밀리초)
+        const AUTO_REFRESH_INTERVAL = 5000; // 5초마다
+        let autoRefreshInterval = null;
+        
+        // 자동 새로고침 시작
+        function startAutoRefresh() {
+            // 이미 실행 중이면 중지
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            // 주기적으로 작업자 목록과 진행 상황 새로고침
+            autoRefreshInterval = setInterval(() => {
+                // 작업자 목록 새로고침
+                loadWorkers();
+                
+                // 진행 상황이 표시되어 있으면 새로고침
+                const progressWorkerId = document.getElementById('progressWorkerSelect').value;
+                if (progressWorkerId) {
+                    loadProgress();
+                }
+                
+                // 통계가 표시되어 있으면 새로고침
+                const statsWorkerId = document.getElementById('statsWorkerSelect').value;
+                if (statsWorkerId) {
+                    loadWorkerStats();
+                }
+            }, AUTO_REFRESH_INTERVAL);
+        }
+        
+        // 자동 새로고침 중지
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+        
         // 페이지 로드 시 관리자 인증 확인
         window.addEventListener('DOMContentLoaded', () => {
             const savedIsAdmin = localStorage.getItem('isAdmin');
@@ -342,6 +343,14 @@
             
             // 작업자 목록 불러오기
             loadWorkers();
+            
+            // 자동 새로고침 시작
+            startAutoRefresh();
+        });
+        
+        // 페이지를 떠날 때 자동 새로고침 중지
+        window.addEventListener('beforeunload', () => {
+            stopAutoRefresh();
         });
         
         // 작업자 목록 불러오기
@@ -378,7 +387,7 @@
         
         // 작업자 선택 드롭다운 업데이트
         function updateWorkerSelects(workers) {
-            const selects = ['assignWorkerSelect', 'progressWorkerSelect', 'statsWorkerSelect'];
+            const selects = ['progressWorkerSelect', 'statsWorkerSelect'];
             selects.forEach(selectId => {
                 const select = document.getElementById(selectId);
                 if (select) {
@@ -395,78 +404,6 @@
                     }
                 }
             });
-        }
-        
-        // 이미지 할당 방법 토글
-        function toggleAssignMethod() {
-            const method = document.getElementById('assignMethod').value;
-            document.getElementById('assignManual').style.display = method === 'manual' ? 'block' : 'none';
-            document.getElementById('assignRange').style.display = method === 'range' ? 'block' : 'none';
-            document.getElementById('assignFile').style.display = method === 'file' ? 'block' : 'none';
-        }
-        
-        // 이미지 할당
-        async function assignImages() {
-            const workerId = document.getElementById('assignWorkerSelect').value;
-            const method = document.getElementById('assignMethod').value;
-            const messageDiv = document.getElementById('assignMessage');
-            
-            if (!workerId) {
-                showMessage('assignMessage', '작업자를 선택해주세요.', 'error');
-                return;
-            }
-            
-            let imageIds = [];
-            
-            try {
-                if (method === 'manual') {
-                    const idsText = document.getElementById('assignImageIds').value.trim();
-                    if (!idsText) {
-                        showMessage('assignMessage', '이미지 ID를 입력해주세요.', 'error');
-                        return;
-                    }
-                    imageIds = idsText.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                } else if (method === 'range') {
-                    const start = parseInt(document.getElementById('assignRangeStart').value);
-                    const end = parseInt(document.getElementById('assignRangeEnd').value);
-                    if (isNaN(start) || isNaN(end) || start >= end) {
-                        showMessage('assignMessage', '올바른 범위를 입력해주세요.', 'error');
-                        return;
-                    }
-                    imageIds = Array.from({length: end - start}, (_, i) => start + i);
-                } else if (method === 'file') {
-                    const fileInput = document.getElementById('assignFileInput');
-                    if (!fileInput.files || fileInput.files.length === 0) {
-                        showMessage('assignMessage', '파일을 선택해주세요.', 'error');
-                        return;
-                    }
-                    const file = fileInput.files[0];
-                    const text = await file.text();
-                    imageIds = text.split('\n').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                }
-                
-                if (imageIds.length === 0) {
-                    showMessage('assignMessage', '유효한 이미지 ID가 없습니다.', 'error');
-                    return;
-                }
-                
-                const response = await fetch(`/api/workers/${workerId}/assign`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({image_ids: imageIds})
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    showMessage('assignMessage', `${data.assigned_count}개의 이미지가 할당되었습니다.`, 'success');
-                    loadProgress(); // 진행 상황 새로고침
-                } else {
-                    showMessage('assignMessage', data.error || '이미지 할당에 실패했습니다.', 'error');
-                }
-            } catch (error) {
-                showMessage('assignMessage', '이미지 할당 중 오류가 발생했습니다.', 'error');
-                console.error(error);
-            }
         }
         
         // 진행 상황 불러오기

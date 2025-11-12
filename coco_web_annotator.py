@@ -39,13 +39,14 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # API Keys (config.py에서 로드, 없으면 환경변수 또는 기본값 사용)
 try:
-    from config import OPENAI_API_KEY, DEFAULT_MODEL, ADMIN_NAMES, ADMIN_PASSWORD
+    from config import OPENAI_API_KEY, DEFAULT_MODEL, ADMIN_NAMES, ADMIN_PASSWORD, WORKER_DATA_DIR
 except ImportError:
     import os
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'openai')
     ADMIN_NAMES = os.getenv('ADMIN_NAMES', '전요한,홍지우,박남준').split(',')
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin2024')
+    WORKER_DATA_DIR = os.getenv('WORKER_DATA_DIR', None)
     if not OPENAI_API_KEY:
         print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
 
@@ -239,7 +240,26 @@ if WORKER_MANAGEMENT_AVAILABLE:
             GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID', None)
             GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', None)
         
+        # 공유 저장소 경로 설정
+        if WORKER_DATA_DIR:
+            import os
+            # 공유 저장소 디렉토리가 없으면 생성
+            if not os.path.exists(WORKER_DATA_DIR):
+                os.makedirs(WORKER_DATA_DIR, exist_ok=True)
+            # 공유 저장소 경로에 파일 경로 설정
+            workers_file = os.path.join(WORKER_DATA_DIR, 'workers.json')
+            assignments_file = os.path.join(WORKER_DATA_DIR, 'worker_assignments.json')
+            stats_file = os.path.join(WORKER_DATA_DIR, 'worker_stats.json')
+        else:
+            # 로컬 사용 (기본값)
+            workers_file = 'workers.json'
+            assignments_file = 'worker_assignments.json'
+            stats_file = 'worker_stats.json'
+        
         worker_manager = WorkerManager(
+            workers_file=workers_file,
+            assignments_file=assignments_file,
+            stats_file=stats_file,
             google_drive_folder_id=GOOGLE_DRIVE_FOLDER_ID,
             google_credentials_path=GOOGLE_CREDENTIALS_PATH
         )
