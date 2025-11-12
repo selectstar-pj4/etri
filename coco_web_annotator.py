@@ -25,28 +25,17 @@ GEMINI_AVAILABLE = False
 
 import re
 
-# 작업자 관리 시스템 import
-try:
-    from worker_management import WorkerManager
-    WORKER_MANAGEMENT_AVAILABLE = True
-except ImportError:
-    WORKER_MANAGEMENT_AVAILABLE = False
-    print("[WARN] Worker management system not available. Install worker_management.py")
-
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # API Keys (config.py에서 로드, 없으면 환경변수 또는 기본값 사용)
 try:
-    from config import OPENAI_API_KEY, DEFAULT_MODEL, ADMIN_NAMES, ADMIN_PASSWORD, WORKER_DATA_DIR
+    from config import OPENAI_API_KEY, DEFAULT_MODEL
 except ImportError:
     import os
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'openai')
-    ADMIN_NAMES = os.getenv('ADMIN_NAMES', '전요한,홍지우,박남준').split(',')
-    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin2024')
-    WORKER_DATA_DIR = os.getenv('WORKER_DATA_DIR', None)
     if not OPENAI_API_KEY:
         print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
 
@@ -119,14 +108,26 @@ class COCOWebAnnotator:
                     # 둘 다 없으면 기본값으로 exo에 추가 (또는 unknown에 추가)
                     unknown_image_ids.append(image_id)
         
+        # 이미지 ID를 파일명 순으로 정렬하는 함수
+        def sort_by_filename(image_id_list):
+            """이미지 ID 리스트를 파일명 순으로 정렬"""
+            def get_filename(image_id):
+                image_info = self.coco.imgs.get(image_id, {})
+                return image_info.get('file_name', '')
+            
+            return sorted(image_id_list, key=get_filename)
+        
         # test_folder가 지정되면 exo만, 아니면 exo + ego + unknown
         if test_folder:
-            self.image_ids = exo_image_ids
-            print(f"[INFO] Test folder mode: {len(exo_image_ids)} images from {test_folder}")
+            self.image_ids = sort_by_filename(exo_image_ids)
+            print(f"[INFO] Test folder mode: {len(exo_image_ids)} images from {test_folder} (sorted by filename)")
         else:
-            # exo 먼저, 그 다음 ego, 마지막에 unknown
-            self.image_ids = exo_image_ids + ego_image_ids + unknown_image_ids
-            print(f"[INFO] Image order: {len(exo_image_ids)} exo images, {len(ego_image_ids)} ego images, {len(unknown_image_ids)} unknown images")
+            # exo 먼저, 그 다음 ego, 마지막에 unknown (각각 파일명 순으로 정렬)
+            sorted_exo = sort_by_filename(exo_image_ids)
+            sorted_ego = sort_by_filename(ego_image_ids)
+            sorted_unknown = sort_by_filename(unknown_image_ids)
+            self.image_ids = sorted_exo + sorted_ego + sorted_unknown
+            print(f"[INFO] Image order: {len(exo_image_ids)} exo images, {len(ego_image_ids)} ego images, {len(unknown_image_ids)} unknown images (all sorted by filename)")
 
         # --- 추가: category id -> name 매핑 로드 ---
         self.category_id_to_name = {}
@@ -229,77 +230,6 @@ annotator = None
 # 이미지 분석 결과 캐시 (image_id를 키로 사용)
 image_analysis_cache = {}
 
-# 작업자 관리 시스템 (전역 인스턴스)
-worker_manager = None
-if WORKER_MANAGEMENT_AVAILABLE:
-    try:
-        # Google Drive 설정 로드
-        try:
-            from config import GOOGLE_DRIVE_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
-        except ImportError:
-            GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID', None)
-            GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', None)
-        
-        # 공유 저장소 경로 설정
-        if WORKER_DATA_DIR:
-            import os
-            # 공유 저장소 접근 가능 여부 확인
-            try:
-                # 공유 저장소 디렉토리가 없으면 생성 시도
-                if not os.path.exists(WORKER_DATA_DIR):
-                    try:
-                        os.makedirs(WORKER_DATA_DIR, exist_ok=True)
-                        print(f"[INFO] 공유 저장소 디렉토리 생성: {WORKER_DATA_DIR}")
-                    except (OSError, PermissionError) as e:
-                        print(f"[ERROR] 공유 저장소 디렉토리 생성 실패: {WORKER_DATA_DIR}")
-                        print(f"[ERROR] 오류 내용: {e}")
-                        print(f"[ERROR] 다음 사항을 확인하세요:")
-                        print(f"[ERROR] 1. 서버 컴퓨터(10.2.80.28)가 켜져 있고 같은 네트워크에 연결되어 있는지")
-                        print(f"[ERROR] 2. 공유 폴더가 제대로 공유되어 있는지")
-                        print(f"[ERROR] 3. 방화벽 설정이 올바른지")
-                        print(f"[ERROR] 4. 네트워크 경로가 올바른지: {WORKER_DATA_DIR}")
-                        raise
-                
-                # 접근 가능 여부 테스트 (읽기/쓰기)
-                test_file = os.path.join(WORKER_DATA_DIR, '.test_access')
-                try:
-                    with open(test_file, 'w') as f:
-                        f.write('test')
-                    os.remove(test_file)
-                    print(f"[INFO] 공유 저장소 접근 성공: {WORKER_DATA_DIR}")
-                except (OSError, PermissionError) as e:
-                    print(f"[ERROR] 공유 저장소 접근 실패: {WORKER_DATA_DIR}")
-                    print(f"[ERROR] 오류 내용: {e}")
-                    print(f"[ERROR] 공유 폴더에 읽기/쓰기 권한이 있는지 확인하세요.")
-                    raise
-                
-                # 공유 저장소 경로에 파일 경로 설정
-                workers_file = os.path.join(WORKER_DATA_DIR, 'workers.json')
-                assignments_file = os.path.join(WORKER_DATA_DIR, 'worker_assignments.json')
-                stats_file = os.path.join(WORKER_DATA_DIR, 'worker_stats.json')
-            except Exception as e:
-                print(f"[WARN] 공유 저장소 사용 불가, 로컬 디렉토리로 대체합니다.")
-                print(f"[WARN] 오류: {e}")
-                workers_file = 'workers.json'
-                assignments_file = 'worker_assignments.json'
-                stats_file = 'worker_stats.json'
-        else:
-            # 로컬 사용 (기본값)
-            workers_file = 'workers.json'
-            assignments_file = 'worker_assignments.json'
-            stats_file = 'worker_stats.json'
-        
-        worker_manager = WorkerManager(
-            workers_file=workers_file,
-            assignments_file=assignments_file,
-            stats_file=stats_file,
-            google_drive_folder_id=GOOGLE_DRIVE_FOLDER_ID,
-            google_credentials_path=GOOGLE_CREDENTIALS_PATH
-        )
-    except Exception as e:
-        print(f"[WARN] Failed to initialize WorkerManager: {e}")
-        worker_manager = None
-
 # idx 검색 라우트 추가 #
 @app.route('/api/find/<int:image_id>')
 def find_by_image_id(image_id):
@@ -322,45 +252,6 @@ def index():
     response.headers['Expires'] = '0'
     return response
 
-@app.route('/admin')
-def admin():
-    """Render the admin interface for worker management."""
-    # 관리자 인증은 프론트엔드에서 처리 (localStorage 기반)
-    # 추가 보안이 필요하면 세션 기반 인증으로 변경 가능
-    response = make_response(render_template('admin.html'))
-    # 브라우저 캐시 방지
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
-
-@app.route('/api/admin/login', methods=['POST'])
-def admin_login():
-    """관리자 로그인 인증"""
-    data = request.json
-    admin_name = data.get('admin_name', '').strip()
-    password = data.get('password', '').strip()
-    
-    if not admin_name or not password:
-        return jsonify({'success': False, 'error': '관리자 이름과 비밀번호를 입력해주세요.'}), 400
-    
-    # 관리자 이름 확인
-    if admin_name not in ADMIN_NAMES:
-        return jsonify({'success': False, 'error': '올바른 관리자 이름이 아닙니다.'}), 401
-    
-    # 비밀번호 확인
-    if password != ADMIN_PASSWORD:
-        return jsonify({'success': False, 'error': '비밀번호가 올바르지 않습니다.'}), 401
-    
-    return jsonify({'success': True, 'admin_name': admin_name})
-
-@app.route('/api/admin/check', methods=['GET'])
-def admin_check():
-    """관리자 인증 상태 확인 (프론트엔드에서 사용)"""
-    # 실제로는 세션 또는 토큰 기반 인증이 필요하지만,
-    # 현재는 프론트엔드의 localStorage를 신뢰
-    return jsonify({'success': True, 'message': 'Admin check endpoint'})
-
 @app.route('/api/exo_image_indices', methods=['GET'])
 def get_exo_image_indices():
     """Get list of all exo image indices (for batch processing) - 빠른 버전"""
@@ -382,51 +273,6 @@ def get_exo_image_indices():
         return jsonify({
             'success': False,
             'error': str(e)
-        }), 500
-
-@app.route('/api/question_candidate/<int:index>', methods=['GET'])
-def get_question_candidate(index):
-    """Get pre-generated question candidate for an image from JSON file."""
-    if index >= len(annotator.image_ids):
-        return jsonify({'error': 'Invalid index'}), 400
-    
-    image_id = annotator.image_ids[index]
-    
-    # 질문 후보 JSON 파일 경로
-    question_candidates_path = os.path.join(annotator.mscoco_folder, 'question_candidates_exo.json')
-    
-    if not os.path.exists(question_candidates_path):
-        return jsonify({
-            'success': False,
-            'error': 'Question candidates file not found',
-            'file_path': question_candidates_path
-        }), 404
-    
-    try:
-        with open(question_candidates_path, 'r', encoding='utf-8') as f:
-            question_candidates = json.load(f)
-        
-        # image_id로 질문 후보 찾기
-        image_id_str = str(image_id)
-        if image_id_str not in question_candidates:
-            return jsonify({
-                'success': False,
-                'error': f'Question candidate not found for image_id: {image_id}'
-            }), 404
-        
-        candidate = question_candidates[image_id_str]
-        
-        return jsonify({
-            'success': True,
-            'image_id': image_id,
-            'question': candidate.get('question', ''),
-            'choices': candidate.get('choices', {}),
-            'correct_answer': candidate.get('correct_answer', 'a')
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Failed to load question candidate: {str(e)}'
         }), 500
 
 @app.route('/api/image/<int:index>')
@@ -2068,6 +1914,8 @@ def save_annotation():
         'question': data['question'],
         'response': data['response'],
         'rationale': data.get('rationale', ''),
+        'question_ko': data.get('question_ko', ''),  # 한글 질문 저장
+        'rationale_ko': data.get('rationale_ko', ''),  # 한글 근거 저장
         'view': view_type,
         'bbox': bbox_value  # 단일 bbox는 배열로 감싸지 않음
     }
@@ -2108,12 +1956,6 @@ def save_annotation():
     if not found:
         view_annotations.append(annotation)  # 새로 추가
     
-    # 작업자 관리: 작업 완료 체크 (worker_id가 제공된 경우)
-    global worker_manager
-    worker_id = data.get('worker_id')
-    if worker_manager and worker_id:
-        worker_manager.mark_completed(worker_id, image_id)
-    
     # Save to file
     try:
         # 출력 디렉토리 생성
@@ -2153,11 +1995,6 @@ def save_annotation():
         annotator._reload_annotations()
         
         response_data = {'success': True, 'updated': found}
-        
-        # 작업자 관리: 작업 완료 정보 포함
-        if worker_manager and worker_id:
-            progress = worker_manager.get_worker_progress(worker_id)
-            response_data['worker_progress'] = progress
         
         return jsonify(response_data)
     except (IOError, OSError) as e:
@@ -2684,13 +2521,6 @@ def main():
     # Create template
     create_template()
     
-    # 작업자 관리 API 라우트 등록
-    if WORKER_MANAGEMENT_AVAILABLE:
-        from worker_management import register_worker_routes
-        register_worker_routes(app, worker_manager)
-        print("[INFO] Worker management system enabled")
-    else:
-        print("[WARN] Worker management system disabled")
     
     print(f"Starting web server at http://{args.host}:{args.port}")
     print("Access the annotation tool in your web browser")

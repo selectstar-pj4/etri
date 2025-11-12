@@ -487,56 +487,10 @@
     </style>
 </head>
 <body>
-    <!-- 로그인 화면 -->
-    <div id="loginScreen" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); z-index: 10000; justify-content: center; align-items: center;">
-        <div style="background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); max-width: 400px; width: 90%;">
-            <!-- 로그인 타입 선택 -->
-            <div style="margin-bottom: 20px; display: flex; gap: 10px; border-bottom: 2px solid #eee; padding-bottom: 15px;">
-                <button id="workerLoginTab" onclick="switchLoginType('worker')" style="flex: 1; padding: 10px; font-size: 1rem; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">작업자</button>
-                <button id="adminLoginTab" onclick="switchLoginType('admin')" style="flex: 1; padding: 10px; font-size: 1rem; background-color: #ddd; color: #666; border: none; border-radius: 5px; cursor: pointer;">관리자</button>
-            </div>
-            
-            <!-- 작업자 로그인 폼 -->
-            <div id="workerLoginForm">
-                <h2 style="margin-top: 0; margin-bottom: 30px; text-align: center; color: #333;">작업자 로그인</h2>
-                <div style="margin-bottom: 20px;">
-                    <label for="loginWorkerId" style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">작업자 ID:</label>
-                    <input type="text" id="loginWorkerId" placeholder="예: worker001" style="width: 100%; padding: 12px; font-size: 1rem; border: 2px solid #ddd; border-radius: 5px; box-sizing: border-box;">
-                </div>
-                <div style="margin-bottom: 30px;">
-                    <label for="loginWorkerName" style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">작업자 이름:</label>
-                    <input type="text" id="loginWorkerName" placeholder="예: 홍길동" style="width: 100%; padding: 12px; font-size: 1rem; border: 2px solid #ddd; border-radius: 5px; box-sizing: border-box;">
-                </div>
-                <button onclick="handleLogin()" style="width: 100%; padding: 14px; font-size: 1.1rem; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">로그인</button>
-            </div>
-            
-            <!-- 관리자 로그인 폼 -->
-            <div id="adminLoginForm" style="display: none;">
-                <h2 style="margin-top: 0; margin-bottom: 30px; text-align: center; color: #333;">관리자 로그인</h2>
-                <div style="margin-bottom: 20px;">
-                    <label for="loginAdminName" style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">관리자 이름:</label>
-                    <input type="text" id="loginAdminName" placeholder="예: 전요한" style="width: 100%; padding: 12px; font-size: 1rem; border: 2px solid #ddd; border-radius: 5px; box-sizing: border-box;">
-                </div>
-                <div style="margin-bottom: 30px;">
-                    <label for="loginAdminPassword" style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">비밀번호:</label>
-                    <input type="password" id="loginAdminPassword" placeholder="비밀번호 입력" style="width: 100%; padding: 12px; font-size: 1rem; border: 2px solid #ddd; border-radius: 5px; box-sizing: border-box;">
-                </div>
-                <button onclick="handleAdminLogin()" style="width: 100%; padding: 14px; font-size: 1.1rem; background-color: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">관리자 로그인</button>
-            </div>
-            
-            <div id="loginError" style="margin-top: 15px; color: red; text-align: center; font-size: 0.9rem; display: none;"></div>
-        </div>
-    </div>
-    
-    <!-- 메인 UI (로그인 전에는 숨김) -->
-    <div id="mainUI" style="display: none;">
+    <!-- 메인 UI -->
+    <div id="mainUI">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
             <h1 style="margin: 0;">MS-COCO Annotation Tool (Web Version)</h1>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 0.9rem; font-weight: bold; color: #4CAF50;" id="currentWorkerInfo"></span>
-                <a href="/admin" id="adminLink" style="display: none; padding: 5px 10px; font-size: 0.8rem; background-color: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none;">관리자</a>
-                <button onclick="logout()" style="padding: 5px 10px; font-size: 0.8rem; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">로그아웃</button>
-            </div>
         </div>
         
         <div class="container">
@@ -755,6 +709,20 @@
                 }
             }
             
+            // localStorage에서 한글 내용 불러오기 (새로고침 시 유지)
+            const currentImageId = currentImageData?.image_id;
+            let savedKoreanData = null;
+            if (currentImageId) {
+                const saved = localStorage.getItem(`korean_${currentImageId}`);
+                if (saved) {
+                    try {
+                        savedKoreanData = JSON.parse(saved);
+                    } catch (e) {
+                        console.error('Failed to parse Korean data from localStorage:', e);
+                    }
+                }
+            }
+            
             fetch(`/api/image/${index}`)
                 .then(response => {
                     if (!response.ok) {
@@ -775,6 +743,22 @@
                     
                     currentImageData = data;
                     currentIndex = index;
+                    
+                    // 이미지 로드 후 localStorage에서 한글 내용 다시 확인 (image_id가 변경되었을 수 있음)
+                    const newImageId = data.image_id;
+                    if (newImageId) {
+                        const saved = localStorage.getItem(`korean_${newImageId}`);
+                        if (saved) {
+                            try {
+                                savedKoreanData = JSON.parse(saved);
+                            } catch (e) {
+                                console.error('Failed to parse Korean data from localStorage:', e);
+                                savedKoreanData = null;
+                            }
+                        } else {
+                            savedKoreanData = null;
+                        }
+                    }
                     
                     // 마지막 작업한 이미지 인덱스 저장
                     localStorage.setItem('lastImageIndex', index.toString());
@@ -844,9 +828,23 @@
                         // userDrawnBboxes 초기화 (새 이미지 로드 시)
                         userDrawnBboxes = [];
                         
-                        // 새로운 필드에 값 설정
-                        document.getElementById('questionKo').value = existingQuestion;
-                        document.getElementById('rationaleKo').value = existingRationale;
+                        // 한글 필드 우선 사용 (저장된 한글이 있으면 사용, 없으면 localStorage, 없으면 영어 내용 사용)
+                        const existingQuestionKo = data.existing_annotation.question_ko || '';
+                        const existingRationaleKo = data.existing_annotation.rationale_ko || '';
+                        
+                        // localStorage에서 한글 내용 확인 (저장된 한글이 없을 때만)
+                        let finalQuestionKo = existingQuestionKo;
+                        let finalRationaleKo = existingRationaleKo;
+                        if (!finalQuestionKo && savedKoreanData && savedKoreanData.questionKo) {
+                            finalQuestionKo = savedKoreanData.questionKo;
+                        }
+                        if (!finalRationaleKo && savedKoreanData && savedKoreanData.rationaleKo) {
+                            finalRationaleKo = savedKoreanData.rationaleKo;
+                        }
+                        
+                        // 새로운 필드에 값 설정 (한글 우선, 없으면 localStorage, 없으면 영어)
+                        document.getElementById('questionKo').value = finalQuestionKo || existingQuestion;
+                        document.getElementById('rationaleKo').value = finalRationaleKo || existingRationale;
                         
                         // Choice 태그에서 선지 추출
                         const choiceMatch = existingQuestion.match(/<choice>(.*?)<\/choice>/i);
@@ -883,26 +881,31 @@
                             document.getElementById('viewEgo').checked = true;
                         }
                     } else {
-                        // 기존 annotation이 없으면 질문 후보 로드 (exo 이미지인 경우만)
-                        if (data.view_type === 'exo') {
-                            loadQuestionCandidate(index);
-                        }
                         // 기존 필드 초기화
                         document.getElementById('question').value = '';
                         document.getElementById('response').value = '';
                         document.getElementById('rationale').value = '';
                         
-                        // 새로운 필드 초기화
-                        document.getElementById('questionKo').value = '';
-                        document.getElementById('rationaleKo').value = '';
-                        document.getElementById('choiceA').value = '';
-                        document.getElementById('choiceB').value = '';
+                        // 새로운 필드 초기화 (localStorage에 저장된 한글 내용이 있으면 사용)
+                        if (savedKoreanData) {
+                            document.getElementById('questionKo').value = savedKoreanData.questionKo || '';
+                            document.getElementById('rationaleKo').value = savedKoreanData.rationaleKo || '';
+                            document.getElementById('choiceA').value = savedKoreanData.choiceA || '';
+                            document.getElementById('choiceB').value = savedKoreanData.choiceB || '';
+                            document.getElementById('choiceC').value = savedKoreanData.choiceC || '';
+                            document.getElementById('choiceD').value = savedKoreanData.choiceD || '';
+                        } else {
+                            document.getElementById('questionKo').value = '';
+                            document.getElementById('rationaleKo').value = '';
+                            document.getElementById('choiceA').value = '';
+                            document.getElementById('choiceB').value = '';
+                            document.getElementById('choiceC').value = '';
+                            document.getElementById('choiceD').value = '';
+                        }
                         
                         // bbox 초기화
                         selectedBboxes = [];
                         userDrawnBboxes = [];
-                        document.getElementById('choiceC').value = '';
-                        document.getElementById('choiceD').value = '';
                         
                         // 이미지가 있는 폴더에 따라 view 자동 설정
                         if (data.view_type) {
@@ -1436,14 +1439,11 @@
                 question: finalQuestion,
                 response: response,
                 rationale: rationale,
+                question_ko: questionKo,  // 한글 질문 저장
+                rationale_ko: rationaleKo,  // 한글 근거 저장
                 view: selectedView,
                 selected_bboxes: selectedBboxes
             };
-            
-            // 작업자 ID가 선택되어 있으면 추가
-            if (selectedWorkerId) {
-                data.worker_id = selectedWorkerId;
-            }
             
             fetch('/api/save', {
                 method: 'POST',
@@ -1453,9 +1453,19 @@
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    // 저장 시 현재 이미지 인덱스도 저장
+                    // 저장 시 현재 이미지 인덱스와 한글 내용도 localStorage에 저장
                     if (currentIndex !== undefined && currentIndex !== null) {
                         localStorage.setItem('lastImageIndex', currentIndex.toString());
+                        // 한글 내용도 localStorage에 저장 (새로고침 시 유지)
+                        const koreanData = {
+                            questionKo: questionKo,
+                            rationaleKo: rationaleKo,
+                            choiceA: choiceA,
+                            choiceB: choiceB,
+                            choiceC: choiceC,
+                            choiceD: choiceD
+                        };
+                        localStorage.setItem(`korean_${currentImageData.image_id}`, JSON.stringify(koreanData));
                     }
                     const message = result.updated ? 'Annotation updated successfully!' : 'Annotation saved successfully!';
                     alert(message);
@@ -1476,10 +1486,9 @@
         }
 
         function updateStatus() {
-            const workerInfo = selectedWorkerId && selectedWorkerName ? ` | 작업자: ${selectedWorkerId} (${selectedWorkerName})` : '';
             document.getElementById('status').textContent = 
                 `Current: ${currentIndex + 1} | Selected bboxes: ` +
-                `${selectedBboxes.length}${workerInfo}`;
+                `${selectedBboxes.length}`;
         }
 
         // === 스크롤로 포커스 이동 ===
@@ -1554,11 +1563,6 @@
                     view: selectedView,
                     selected_bboxes: selectedBboxes
                 };
-                
-                // 작업자 ID가 선택되어 있으면 추가
-                if (selectedWorkerId) {
-                    data.worker_id = selectedWorkerId;
-                }
                 
                 fetch('/api/save', {
                     method: 'POST',
@@ -1894,47 +1898,7 @@
             generateQuestions();
         }
         
-        // 질문 후보 로드 함수
-        function loadQuestionCandidate(index) {
-            fetch(`/api/question_candidate/${index}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // 질문 후보가 있으면 textarea에 채우기
-                        const questionKo = data.question || '';
-                        const choices = data.choices || {};
-                        
-                        // questionKo textarea에 질문 채우기
-                        document.getElementById('questionKo').value = questionKo;
-                        
-                        // choices textarea에 선택지 채우기
-                        if (choices.a) document.getElementById('choiceA').value = choices.a;
-                        if (choices.b) document.getElementById('choiceB').value = choices.b;
-                        if (choices.c) document.getElementById('choiceC').value = choices.c;
-                        if (choices.d) document.getElementById('choiceD').value = choices.d;
-                        
-                        // 정답 checkbox 선택
-                        const correctAnswer = data.correct_answer || 'a';
-                        const checkboxes = document.querySelectorAll('input[name="choiceCheck"]');
-                        checkboxes.forEach(cb => {
-                            if (cb.value === correctAnswer) {
-                                cb.checked = true;
-                            }
-                        });
-                        
-                        updateStatus('질문 후보 로드 완료');
-                    } else {
-                        // 질문 후보가 없으면 조용히 무시 (에러 메시지 표시 안 함)
-                        console.log(`[INFO] No question candidate for image ${index}: ${data.error || 'Not found'}`);
-                    }
-                })
-                .catch(error => {
-                    // 에러 발생 시 조용히 무시 (에러 메시지 표시 안 함)
-                    console.log(`[INFO] Failed to load question candidate for image ${index}: ${error.message}`);
-                });
-        }
-        
-        // 번역 함수들 (추후 구현)
+        // 번역 함수들
         function translateQuestion() {
             const questionKo = document.getElementById('questionKo').value.trim();
             if (!questionKo) {
@@ -2373,250 +2337,6 @@
                 }
             }
         }
-        
-        // 작업자 로그인 관리
-        let selectedWorkerId = null;
-        let selectedWorkerName = null;
-        let isAdmin = false;
-        let adminName = null;
-        
-        // 로그인 처리
-        async function handleLogin() {
-            const workerId = document.getElementById('loginWorkerId').value.trim();
-            const workerName = document.getElementById('loginWorkerName').value.trim();
-            const errorDiv = document.getElementById('loginError');
-            
-            if (!workerId || !workerName) {
-                errorDiv.textContent = '작업자 ID와 이름을 모두 입력해주세요.';
-                errorDiv.style.display = 'block';
-                return;
-            }
-            
-            try {
-                // 작업자 추가/확인
-                const response = await fetch('/api/workers', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        worker_id: workerId,
-                        worker_name: workerName
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    // 로그인 성공
-                    selectedWorkerId = workerId;
-                    selectedWorkerName = workerName;
-                    
-                    // localStorage에 저장
-                    localStorage.setItem('selectedWorkerId', workerId);
-                    localStorage.setItem('selectedWorkerName', workerName);
-                    
-                    // UI 전환
-                    showMainUI();
-                } else {
-                    errorDiv.textContent = data.error || '로그인에 실패했습니다.';
-                    errorDiv.style.display = 'block';
-                }
-            } catch (error) {
-                console.error('Login error:', error);
-                errorDiv.textContent = '서버 연결에 실패했습니다.';
-                errorDiv.style.display = 'block';
-            }
-        }
-        
-        // 로그인 타입 전환
-        function switchLoginType(type) {
-            const workerTab = document.getElementById('workerLoginTab');
-            const adminTab = document.getElementById('adminLoginTab');
-            const workerForm = document.getElementById('workerLoginForm');
-            const adminForm = document.getElementById('adminLoginForm');
-            const errorDiv = document.getElementById('loginError');
-            
-            errorDiv.style.display = 'none';
-            
-            if (type === 'worker') {
-                workerTab.style.backgroundColor = '#4CAF50';
-                workerTab.style.color = 'white';
-                workerTab.style.fontWeight = 'bold';
-                adminTab.style.backgroundColor = '#ddd';
-                adminTab.style.color = '#666';
-                adminTab.style.fontWeight = 'normal';
-                workerForm.style.display = 'block';
-                adminForm.style.display = 'none';
-            } else {
-                adminTab.style.backgroundColor = '#2196F3';
-                adminTab.style.color = 'white';
-                adminTab.style.fontWeight = 'bold';
-                workerTab.style.backgroundColor = '#ddd';
-                workerTab.style.color = '#666';
-                workerTab.style.fontWeight = 'normal';
-                adminForm.style.display = 'block';
-                workerForm.style.display = 'none';
-            }
-        }
-        
-        // 관리자 로그인 처리
-        async function handleAdminLogin() {
-            const adminName = document.getElementById('loginAdminName').value.trim();
-            const password = document.getElementById('loginAdminPassword').value.trim();
-            const errorDiv = document.getElementById('loginError');
-            
-            if (!adminName || !password) {
-                errorDiv.textContent = '관리자 이름과 비밀번호를 모두 입력해주세요.';
-                errorDiv.style.display = 'block';
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/admin/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        admin_name: adminName,
-                        password: password
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    // 관리자 로그인 성공
-                    isAdmin = true;
-                    window.adminName = adminName;
-                    
-                    // localStorage에 저장
-                    localStorage.setItem('isAdmin', 'true');
-                    localStorage.setItem('adminName', adminName);
-                    
-                    // 관리자 페이지로 이동
-                    window.location.href = '/admin';
-                } else {
-                    errorDiv.textContent = data.error || '관리자 로그인에 실패했습니다.';
-                    errorDiv.style.display = 'block';
-                }
-            } catch (error) {
-                console.error('Admin login error:', error);
-                errorDiv.textContent = '서버 연결에 실패했습니다.';
-                errorDiv.style.display = 'block';
-            }
-        }
-        
-        // 로그아웃
-        function logout() {
-            if (confirm('로그아웃하시겠습니까?')) {
-                selectedWorkerId = null;
-                selectedWorkerName = null;
-                isAdmin = false;
-                adminName = null;
-                localStorage.removeItem('selectedWorkerId');
-                localStorage.removeItem('selectedWorkerName');
-                localStorage.removeItem('isAdmin');
-                localStorage.removeItem('adminName');
-                showLoginScreen();
-            }
-        }
-        
-        // 로그인 화면 표시
-        function showLoginScreen() {
-            document.getElementById('loginScreen').style.display = 'flex';
-            document.getElementById('mainUI').style.display = 'none';
-            // 입력 필드 초기화
-            document.getElementById('loginWorkerId').value = '';
-            document.getElementById('loginWorkerName').value = '';
-            document.getElementById('loginError').style.display = 'none';
-        }
-        
-        // 메인 UI 표시
-        function showMainUI() {
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainUI').style.display = 'block';
-            
-            // 작업자 정보 표시
-            const workerInfo = document.getElementById('currentWorkerInfo');
-            if (workerInfo && selectedWorkerId && selectedWorkerName) {
-                workerInfo.textContent = `작업자: ${selectedWorkerId} (${selectedWorkerName})`;
-            }
-            
-            // 관리자 버튼 표시/숨김 (작업자에게는 숨김)
-            const adminButton = document.querySelector('a[href="/admin"]');
-            if (adminButton) {
-                adminButton.style.display = 'none';  // 기본적으로 숨김 (관리자만 보임)
-            }
-            
-            // 이미지 로드 (이미 로드되어 있으면 다시 로드하지 않음)
-            if (currentImageData === null) {
-                loadImage(0);
-            }
-        }
-        
-        // Enter 키로 로그인
-        document.addEventListener('DOMContentLoaded', () => {
-            const workerIdInput = document.getElementById('loginWorkerId');
-            const workerNameInput = document.getElementById('loginWorkerName');
-            const adminNameInput = document.getElementById('loginAdminName');
-            const adminPasswordInput = document.getElementById('loginAdminPassword');
-            
-            // 작업자 로그인 Enter 키 처리
-            if (workerIdInput) {
-                workerIdInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        workerNameInput.focus();
-                    }
-                });
-            }
-            
-            if (workerNameInput) {
-                workerNameInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        handleLogin();
-                    }
-                });
-            }
-            
-            // 관리자 로그인 Enter 키 처리
-            if (adminNameInput) {
-                adminNameInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        adminPasswordInput.focus();
-                    }
-                });
-            }
-            
-            if (adminPasswordInput) {
-                adminPasswordInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        handleAdminLogin();
-                    }
-                });
-            }
-        });
-        
-        // 페이지 로드 시 로그인 상태 확인
-        window.addEventListener('DOMContentLoaded', () => {
-            const savedIsAdmin = localStorage.getItem('isAdmin');
-            const savedAdminName = localStorage.getItem('adminName');
-            const savedWorkerId = localStorage.getItem('selectedWorkerId');
-            const savedWorkerName = localStorage.getItem('selectedWorkerName');
-            
-            // 관리자로 로그인되어 있으면 관리자 페이지로 리다이렉트
-            if (savedIsAdmin === 'true' && savedAdminName) {
-                window.location.href = '/admin';
-                return;
-            }
-            
-            if (savedWorkerId && savedWorkerName) {
-                // 저장된 작업자 정보로 자동 로그인
-                selectedWorkerId = savedWorkerId;
-                selectedWorkerName = savedWorkerName;
-                showMainUI();
-            } else {
-                // 로그인 화면 표시
-                showLoginScreen();
-            }
-        });
         
         // 페이지 로드 시 마지막 작업 이미지로 이동
         // loadImage 함수 내부에서 처리하므로 여기서는 첫 이미지만 로드
