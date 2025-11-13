@@ -1914,8 +1914,6 @@ def save_annotation():
         'question': data['question'],
         'response': data['response'],
         'rationale': data.get('rationale', ''),
-        'question_ko': data.get('question_ko', ''),  # 한글 질문 저장
-        'rationale_ko': data.get('rationale_ko', ''),  # 한글 근거 저장
         'view': view_type,
         'bbox': bbox_value  # 단일 bbox는 배열로 감싸지 않음
     }
