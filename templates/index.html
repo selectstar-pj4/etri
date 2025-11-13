@@ -825,8 +825,15 @@
                             selectedBboxes = [];
                         }
                         
-                        // userDrawnBboxes 초기화 (새 이미지 로드 시)
+                        // 저장된 bbox를 userDrawnBboxes에도 추가 (이미지에 표시되도록)
                         userDrawnBboxes = [];
+                        selectedBboxes.forEach(bbox => {
+                            // 중복 체크 후 추가
+                            const bboxStr = JSON.stringify(bbox);
+                            if (!userDrawnBboxes.some(ub => JSON.stringify(ub) === bboxStr)) {
+                                userDrawnBboxes.push(bbox);
+                            }
+                        });
                         
                         // 한글 필드 우선 사용 (저장된 한글이 있으면 사용, 없으면 localStorage, 없으면 영어 내용 사용)
                         const existingQuestionKo = data.existing_annotation.question_ko || '';
@@ -872,6 +879,16 @@
                         } else {
                             selectedBboxes = [];
                         }
+                        
+                        // 저장된 bbox를 userDrawnBboxes에도 추가 (이미지에 표시되도록)
+                        userDrawnBboxes = [];
+                        selectedBboxes.forEach(bbox => {
+                            // 중복 체크 후 추가
+                            const bboxStr = JSON.stringify(bbox);
+                            if (!userDrawnBboxes.some(ub => JSON.stringify(ub) === bboxStr)) {
+                                userDrawnBboxes.push(bbox);
+                            }
+                        });
                         
                         // Set view radio button
                         const view = data.existing_annotation.view || '';
