@@ -10,16 +10,21 @@
     <style>
         * { box-sizing: border-box; }
         body { 
-            font-family: Arial, sans-serif; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
             margin: 0;
             padding: 10px;
             padding-bottom: 50px; /* 상태 바 공간 확보 */
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
         }
         h1 {
             font-size: 1.3rem;
             margin-bottom: 10px;
             margin-top: 5px;
             text-align: center;
+            color: #2c3e50;
+            font-weight: 600;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         .container { 
             display: flex; 
@@ -27,34 +32,58 @@
             flex-direction: row;
         }
         .image-panel { 
-            flex: 2; 
+            flex: 1.5; 
             min-width: 0; /* flex 축소 허용 */
         }
         .control-panel { 
-            flex: 1; 
-            min-width: 350px;
+            flex: 1.5; 
+            min-width: 400px;
             display: flex;
             gap: 15px;
             flex-direction: row;
         }
         .control-panel-left {
             flex: 1;
-            min-width: 280px;
+            min-width: 320px;
             max-height: calc(100vh - 100px);
             overflow-y: auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+            transition: box-shadow 0.3s ease;
+        }
+        .control-panel-left:hover {
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.1);
         }
         .control-panel-right {
             flex: 1;
-            min-width: 280px;
+            min-width: 320px;
             max-height: calc(100vh - 100px);
             overflow-y: auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+            transition: box-shadow 0.3s ease;
+        }
+        .control-panel-right:hover {
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.1);
         }
         .image-container { 
-            border: 2px solid #ccc; 
+            border: 2px solid #e0e0e0; 
             position: relative; 
             display: inline-block;
             width: 100%;
             max-width: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            background: #fff;
+            transition: box-shadow 0.3s ease;
+        }
+        .image-container:hover {
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
         }
         #image { 
             max-width: 100%; 
@@ -66,24 +95,27 @@
             border: 2px solid rgba(255, 0, 0, 0.7); 
             background-color: rgba(255, 0, 0, 0.1);
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 10;
+            border-radius: 4px;
         }
         .bbox:hover { 
             border-color: rgba(255, 255, 0, 0.9);
             background-color: rgba(255, 255, 0, 0.2);
-            transform: scale(1.05);
-            box-shadow: 0 0 10px rgba(255, 255, 0, 0.5);
+            transform: scale(1.02);
+            box-shadow: 0 0 15px rgba(255, 255, 0, 0.6);
             z-index: 20;
         }
         .bbox.selected { 
             border-color: rgba(0, 0, 255, 0.9);
             background-color: rgba(0, 0, 255, 0.2);
             border-width: 3px;
+            box-shadow: 0 0 12px rgba(0, 0, 255, 0.5);
         }
         .bbox.selected:hover { 
             border-color: rgba(0, 255, 255, 0.9);
             background-color: rgba(0, 255, 255, 0.3);
+            box-shadow: 0 0 18px rgba(0, 255, 255, 0.7);
         }
         .bbox-label {
             position: absolute;
@@ -126,37 +158,80 @@
             pointer-events: none;
             z-index: 1000;
         }
-        .form-group { margin-bottom: 10px; }
+        .form-group { margin-bottom: 12px; }
         label { 
             display: block; 
-            font-weight: bold; 
-            margin-bottom: 3px; 
+            font-weight: 600; 
+            margin-bottom: 5px; 
             font-size: 0.85rem;
+            color: #34495e;
         }
         textarea, input { 
             width: 100%; 
-            padding: 6px; 
-            border: 1px solid #ccc; 
+            padding: 10px 12px; 
+            border: 2px solid #e0e0e0; 
             font-size: 0.85rem;
             resize: vertical;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            background: #fff;
+        }
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+            transform: translateY(-1px);
+        }
+        input[type="radio"], input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            accent-color: #4CAF50;
+        }
+        input[type="radio"]:hover, input[type="checkbox"]:hover {
+            transform: scale(1.1);
         }
         button { 
-            padding: 10px 15px; 
+            padding: 10px 20px; 
             margin: 5px; 
             border: none; 
             cursor: pointer;
             font-size: 0.9rem;
-            border-radius: 4px;
-            transition: background-color 0.2s;
+            border-radius: 8px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
         button:hover {
-            opacity: 0.9;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
         }
-        .btn-save { background-color: lightgreen; }
-        .btn-nav { background-color: lightblue; }
+        button:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+        .btn-save { 
+            background: linear-gradient(135deg, #66bb6a 0%, #4caf50 100%);
+            color: white;
+        }
+        .btn-save:hover {
+            background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
+        }
+        .btn-nav { 
+            background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%);
+            color: white;
+        }
+        .btn-nav:hover {
+            background: linear-gradient(135deg, #42a5f5 0%, #2196f3 100%);
+        }
         .btn-clear { 
-            background-color: #ffcccc; 
+            background: linear-gradient(135deg, #ef5350 0%, #e53935 100%);
+            color: white;
             margin-top: 5px;
+        }
+        .btn-clear:hover {
+            background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
         }
         .search-container {
             display: flex;
@@ -177,10 +252,16 @@
             align-items: center;
             gap: 8px;
             padding: 6px 8px;
-            background-color: #e8f5e9;
-            border-radius: 4px;
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            border-radius: 8px;
             border: 2px solid #4CAF50;
             flex-shrink: 0;
+            box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);
+            transition: all 0.3s ease;
+        }
+        .bbox-toggle-inline:hover {
+            box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+            transform: translateY(-1px);
         }
         .bbox-toggle-inline input[type="checkbox"] {
             width: 20px;
@@ -327,12 +408,14 @@
             bottom: 0; 
             left: 0; 
             right: 0; 
-            background: #f0f0f0; 
-            padding: 6px; 
-            border-top: 1px solid #ccc;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 10px; 
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
             font-size: 0.75rem;
             z-index: 1000;
-            box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+            border-radius: 12px 12px 0 0;
         }
         
         /* 반응형 디자인 - 태블릿 및 모바일 */
@@ -490,7 +573,12 @@
     <!-- 메인 UI -->
     <div id="mainUI">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
-            <h1 style="margin: 0;">MS-COCO Annotation Tool (Web Version)</h1>
+            <h1 style="margin: 0; flex: 1;">MS-COCO Annotation Tool (Web Version)</h1>
+            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                <label for="workerId" style="font-size: 0.9rem; margin: 0; font-weight: bold;">작업자 ID: 
+                    <span id="workerIdStatus" style="color: #4CAF50; font-weight: bold;"></span></label>
+                <input id="workerId" type="text" placeholder="config.py에서 자동 로드..." readonly style="padding: 8px 12px; font-size: 0.85rem; min-width: 150px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+            </div>
         </div>
         
         <div class="container">
@@ -509,13 +597,13 @@
                         <label for="questionKo" style="font-size: 0.8rem; margin: 0;">Question (한글): 
                             <span style="color: red;">*</span></label>
                     </div>
-                    <div id="questionCandidatesContainer" style="display: none; margin-bottom: 4px; padding: 8px; background-color: #f0f0f0; border-radius: 4px; width: 100%; box-sizing: border-box;">
+                    <div id="questionCandidatesContainer" style="display: none; margin-bottom: 4px; padding: 12px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); border-radius: 8px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <label style="font-size: 0.75rem; margin-bottom: 4px; display: block; font-weight: bold;">질문 후보 선택:</label>
                         <div id="questionCandidates" style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
                             <!-- 질문 후보가 여기에 동적으로 추가됨 -->
                         </div>
                     </div>
-                    <textarea id="questionKo" rows="8" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;" placeholder="한글 질문을 입력하세요"></textarea>
+                    <textarea id="questionKo" rows="8" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;" placeholder="한글 질문을 입력하세요"></textarea>
                 </div>
                 
                 <!-- 초록색 칸: Choice a~d 입력 -->
@@ -526,44 +614,44 @@
                         <div style="display: flex; gap: 4px; align-items: center;">
                             <input type="radio" id="choiceCheckA" name="choiceCheck" value="a" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
                             <label for="choiceA" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(a):</label>
-                            <input id="choiceA" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 a 입력">
+                            <input id="choiceA" type="text" style="flex: 1; padding: 8px 10px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; transition: all 0.3s ease;" placeholder="선지 a 입력">
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center;">
                             <input type="radio" id="choiceCheckB" name="choiceCheck" value="b" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
                             <label for="choiceB" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(b):</label>
-                            <input id="choiceB" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 b 입력">
+                            <input id="choiceB" type="text" style="flex: 1; padding: 8px 10px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; transition: all 0.3s ease;" placeholder="선지 b 입력">
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center;">
                             <input type="radio" id="choiceCheckC" name="choiceCheck" value="c" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
                             <label for="choiceC" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(c):</label>
-                            <input id="choiceC" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 c 입력">
+                            <input id="choiceC" type="text" style="flex: 1; padding: 8px 10px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; transition: all 0.3s ease;" placeholder="선지 c 입력">
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center;">
                             <input type="radio" id="choiceCheckD" name="choiceCheck" value="d" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
                             <label for="choiceD" style="font-size: 0.75rem; margin: 0; min-width: 25px; flex-shrink: 0;">(d):</label>
-                            <input id="choiceD" type="text" style="flex: 1; padding: 4px; font-size: 0.75rem;" placeholder="선지 d 입력">
+                            <input id="choiceD" type="text" style="flex: 1; padding: 8px 10px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; transition: all 0.3s ease;" placeholder="선지 d 입력">
                         </div>
                     </div>
                     <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
-                        <button type="button" onclick="translateChoices()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap;">번역</button>
+                        <button type="button" onclick="translateChoices()" style="padding: 6px 12px; font-size: 0.7rem; white-space: nowrap; background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease;">번역</button>
                     </div>
                 </div>
                 
-                <!-- 빨간색 칸: Rationale 한글 입력 -->
-                <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="rationaleKo" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale (한글):</label>
-                    <textarea id="rationaleKo" rows="8" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;" placeholder="한글 근거를 입력하세요"></textarea>
+                <!-- 빨간색 칸: Rationale 한글 입력 (비활성화) -->
+                <div class="form-group" style="margin-bottom: 8px; opacity: 0.5;">
+                    <label for="rationaleKo" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale (한글): <span style="color: #999; font-size: 0.7rem;">(당분간 사용 안 함)</span></label>
+                    <textarea id="rationaleKo" rows="8" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="당분간 사용하지 않습니다" disabled></textarea>
                     <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px;">
-                        <button type="button" onclick="translateRationale()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap;">번역</button>
+                        <button type="button" onclick="translateRationale()" style="padding: 6px 12px; font-size: 0.7rem; white-space: nowrap; opacity: 0.5; cursor: not-allowed; background: linear-gradient(135deg, #9e9e9e 0%, #757575 100%); color: white; border: none; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" disabled>번역</button>
                         <button type="button" onclick="reviewTranslation()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; display: none;">검수</button>
                     </div>
                     <div id="reviewResultContainer" style="display: none; margin-top: 8px;">
                         <div id="reviewOKMessage" style="display: none; color: #4CAF50; font-weight: bold; font-size: 0.8rem; margin-bottom: 4px;">✓ OK</div>
                         <label style="font-size: 0.75rem; margin-bottom: 2px; color: #666;">검수 결과 (수정된 문장):</label>
-                        <textarea id="reviewResult" rows="6" style="width: 100%; padding: 5px; font-size: 0.75rem; line-height: 1.4; border: 1px solid #ccc; background-color: #f9f9f9;" placeholder="검수 결과가 여기에 표시됩니다." readonly></textarea>
+                        <textarea id="reviewResult" rows="6" style="width: 100%; padding: 10px 12px; font-size: 0.75rem; line-height: 1.4; border: 2px solid #e0e0e0; background: linear-gradient(135deg, #f9f9f9 0%, #f0f0f0 100%); border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);" placeholder="검수 결과가 여기에 표시됩니다." readonly></textarea>
                         <div style="display: flex; gap: 4px; margin-top: 4px;">
-                            <button type="button" onclick="applyReviewResult()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">적용</button>
-                            <button type="button" onclick="closeReviewResult()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; background-color: #999; color: white; border: none; border-radius: 3px; cursor: pointer;">닫기</button>
+                            <button type="button" onclick="applyReviewResult()" style="padding: 6px 12px; font-size: 0.7rem; white-space: nowrap; background: linear-gradient(135deg, #66bb6a 0%, #4caf50 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease;">적용</button>
+                            <button type="button" onclick="closeReviewResult()" style="padding: 6px 12px; font-size: 0.7rem; white-space: nowrap; background: linear-gradient(135deg, #9e9e9e 0%, #757575 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease;">닫기</button>
                         </div>
                     </div>
                 </div>
@@ -574,38 +662,38 @@
                 <!-- === 추가: Bbox 표시/숨김 토글과 Image ID를 같은 줄에 배치 === -->
                 <div class="form-group" style="margin-bottom: 8px;">
                     <div style="display: flex; gap: 6px; align-items: center; flex-wrap: nowrap;">
-                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 6px; background-color: #e8f5e9; border-radius: 4px; border: 2px solid #4CAF50; flex-shrink: 0;">
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 8px; border: 2px solid #4CAF50; flex-shrink: 0; box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);">
                             <input type="checkbox" id="bboxToggle" checked onchange="toggleBboxes()" style="width: 18px; height: 18px; margin: 0; cursor: pointer; flex-shrink: 0;">
                             <label for="bboxToggle" style="font-size: 0.75rem; font-weight: 700; margin: 0; cursor: pointer; white-space: nowrap; user-select: none; color: #2e7d32;">Bbox</label>
                         </div>
-                        <button id="drawBboxBtn" onclick="toggleDrawMode()" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer;">Draw Bbox</button>
+                        <button id="drawBboxBtn" onclick="toggleDrawMode()" style="flex-shrink: 0; padding: 6px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">Draw Bbox</button>
                         <label for="searchId" style="margin: 0; margin-right: 4px; font-size: 0.75rem; flex-shrink: 0;">Image ID:</label>
                         <div style="flex: 1; min-width: 0; display: flex; gap: 4px;">
-                            <input id="searchId" type="number" placeholder="ex 184613" style="flex: 1; min-width: 0; padding: 4px; font-size: 0.75rem;">
-                            <button onclick="jumpToId()" style="flex-shrink: 0; padding: 4px 10px; font-size: 0.75rem;">Go</button>
+                            <input id="searchId" type="number" placeholder="ex 184613" style="flex: 1; min-width: 0; padding: 8px 10px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; transition: all 0.3s ease;">
+                            <button onclick="jumpToId()" style="flex-shrink: 0; padding: 6px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">Go</button>
                         </div>
                     </div>
                 </div>  
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label style="font-size: 0.75rem; margin-bottom: 2px;">Image Info:</label>
-                    <div id="imageInfo" style="font-size: 0.7rem; line-height: 1.2; padding: 4px; background-color: #f9f9f9; border-radius: 4px; border: 1px solid #e0e0e0;">Loading...</div>
+                    <div id="imageInfo" style="font-size: 0.7rem; line-height: 1.2; padding: 10px; background: linear-gradient(135deg, #f9f9f9 0%, #f0f0f0 100%); border-radius: 8px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">Loading...</div>
                 </div>
                 
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label for="question" style="font-size: 0.8rem; margin-bottom: 2px;">Question: 
                         <span style="color: red;">*</span></label>
-                    <textarea id="question" rows="5" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;"></textarea>
+                    <textarea id="question" rows="5" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;"></textarea>
                 </div>
                 
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label for="response" style="font-size: 0.8rem; margin-bottom: 2px;">Response: 
                         <span style="color: red;">*</span></label>
-                    <textarea id="response" rows="1" style="padding: 5px; font-size: 0.8rem; min-height: 28px; height: 28px;"></textarea>
+                    <textarea id="response" rows="1" style="padding: 10px 12px; font-size: 0.8rem; min-height: 28px; height: 28px; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;"></textarea>
                 </div>
                 
-                <div class="form-group" style="margin-bottom: 8px;">
-                    <label for="rationale" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale:</label>
-                    <textarea id="rationale" rows="5" style="width: 100%; padding: 5px; font-size: 0.8rem; line-height: 1.4;"></textarea>
+                <div class="form-group" style="margin-bottom: 8px; opacity: 0.5;">
+                    <label for="rationale" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale: <span style="color: #999; font-size: 0.7rem;">(당분간 사용 안 함)</span></label>
+                    <textarea id="rationale" rows="5" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px;" disabled></textarea>
                 </div>
                 
                 <div class="form-group" style="margin-bottom: 8px;">
@@ -625,7 +713,7 @@
                 <div class="form-group" style="margin-bottom: 8px;">
                     <label for="selectedBboxes" style="font-size: 0.8rem; margin-bottom: 2px;">Selected Bounding Boxes: 
                         <span style="color: red;">*</span></label>
-                    <textarea id="selectedBboxes" rows="2" readonly style="padding: 5px; font-size: 0.75rem;"></textarea>
+                    <textarea id="selectedBboxes" rows="2" readonly style="padding: 10px 12px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 8px; background: linear-gradient(135deg, #f9f9f9 0%, #f0f0f0 100%); box-shadow: 0 2px 4px rgba(0,0,0,0.05);"></textarea>
                     <button onclick="clearBboxes()" class="btn-clear" style="margin-top: 4px; padding: 5px 10px; font-size: 0.75rem;">Clear Bboxes</button>
                 </div>
                 
@@ -799,28 +887,36 @@
                         `Display Size: ${data.display_width}x${data.display_height}<br>` +
                         `File: ${data.file_name}`;
                     
-                    // Load existing annotation
+                    // Load existing annotation (오른쪽 패널만)
                     if (data.existing_annotation) {
                         const existingQuestion = data.existing_annotation.question || '';
                         const existingResponse = data.existing_annotation.response || '';
                         const existingRationale = data.existing_annotation.rationale || '';
                         
-                        // 기존 필드에 값 설정
+                        // 오른쪽 패널 필드에만 값 설정 (왼쪽 패널은 읽지 않음)
                         document.getElementById('question').value = existingQuestion;
                         document.getElementById('response').value = existingResponse;
                         document.getElementById('rationale').value = existingRationale;
                         
-                        // 기존 bbox 로드
+                        // 기존 bbox 로드 (소수점 둘째자리로 통일)
                         const existingBbox = data.existing_annotation.bbox;
                         if (existingBbox) {
                             // bbox가 배열의 배열인지 단일 배열인지 확인
+                            let bboxArray = [];
                             if (Array.isArray(existingBbox[0])) {
                                 // 여러 bbox
-                                selectedBboxes = existingBbox.map(b => Array.isArray(b) ? b : [b]);
+                                bboxArray = existingBbox.map(b => Array.isArray(b) ? b : [b]);
                             } else {
                                 // 단일 bbox
-                                selectedBboxes = [existingBbox];
+                                bboxArray = [existingBbox];
                             }
+                            // 소수점 둘째자리로 통일
+                            selectedBboxes = bboxArray.map(bbox => {
+                                if (Array.isArray(bbox)) {
+                                    return bbox.map(coord => typeof coord === 'number' ? parseFloat(coord.toFixed(2)) : coord);
+                                }
+                                return bbox;
+                            });
                         } else {
                             selectedBboxes = [];
                         }
@@ -835,60 +931,7 @@
                             }
                         });
                         
-                        // 한글 필드 우선 사용 (저장된 한글이 있으면 사용, 없으면 localStorage, 없으면 영어 내용 사용)
-                        const existingQuestionKo = data.existing_annotation.question_ko || '';
-                        const existingRationaleKo = data.existing_annotation.rationale_ko || '';
-                        
-                        // localStorage에서 한글 내용 확인 (저장된 한글이 없을 때만)
-                        let finalQuestionKo = existingQuestionKo;
-                        let finalRationaleKo = existingRationaleKo;
-                        if (!finalQuestionKo && savedKoreanData && savedKoreanData.questionKo) {
-                            finalQuestionKo = savedKoreanData.questionKo;
-                        }
-                        if (!finalRationaleKo && savedKoreanData && savedKoreanData.rationaleKo) {
-                            finalRationaleKo = savedKoreanData.rationaleKo;
-                        }
-                        
-                        // 새로운 필드에 값 설정 (한글 우선, 없으면 localStorage, 없으면 영어)
-                        document.getElementById('questionKo').value = finalQuestionKo || existingQuestion;
-                        document.getElementById('rationaleKo').value = finalRationaleKo || existingRationale;
-                        
-                        // Choice 태그에서 선지 추출
-                        const choiceMatch = existingQuestion.match(/<choice>(.*?)<\/choice>/i);
-                        if (choiceMatch) {
-                            const choiceText = choiceMatch[1];
-                            const choices = choiceText.split(',').map(c => c.trim());
-                            if (choices.length >= 4) {
-                                document.getElementById('choiceA').value = choices[0].replace(/^\(a\)\s*/i, '').trim();
-                                document.getElementById('choiceB').value = choices[1].replace(/^\(b\)\s*/i, '').trim();
-                                document.getElementById('choiceC').value = choices[2].replace(/^\(c\)\s*/i, '').trim();
-                                document.getElementById('choiceD').value = choices[3].replace(/^\(d\)\s*/i, '').trim();
-                            }
-                        }
-                        
-                        // bbox 처리: 배열의 배열이거나 단일 배열일 수 있음
-                        let bboxData = data.existing_annotation.bbox || [];
-                        if (bboxData.length > 0) {
-                            // 첫 번째 요소가 숫자면 단일 bbox [x,y,w,h] -> [[x,y,w,h]]로 변환
-                            if (typeof bboxData[0] === 'number') {
-                                selectedBboxes = [bboxData];
-                            } else {
-                                // 이미 배열의 배열 형태
-                                selectedBboxes = bboxData;
-                            }
-                        } else {
-                            selectedBboxes = [];
-                        }
-                        
-                        // 저장된 bbox를 userDrawnBboxes에도 추가 (이미지에 표시되도록)
-                        userDrawnBboxes = [];
-                        selectedBboxes.forEach(bbox => {
-                            // 중복 체크 후 추가
-                            const bboxStr = JSON.stringify(bbox);
-                            if (!userDrawnBboxes.some(ub => JSON.stringify(ub) === bboxStr)) {
-                                userDrawnBboxes.push(bbox);
-                            }
-                        });
+                        // 왼쪽 패널은 JSON에서 읽어오지 않음 (작업자가 직접 입력)
                         
                         // Set view radio button
                         const view = data.existing_annotation.view || '';
@@ -1430,6 +1473,9 @@
                 }
             }
             
+            // 작업자 ID 가져오기 (입력 필드에서 가져오거나 서버에서 자동 사용)
+            const workerId = document.getElementById('workerId').value.trim();
+            
             // Client-side validation
             const missingFields = [];
             if (!question) missingFields.push('question');
@@ -1437,12 +1483,80 @@
             if (!choiceA || !choiceB || !choiceC || !choiceD) missingFields.push('choices (a, b, c, d)');
             if (!selectedView) missingFields.push('view');
             if (selectedBboxes.length === 0) missingFields.push('bbox');
+            // 작업자 ID는 서버에서 config.py의 WORKER_ID를 자동으로 사용하므로 필수 검증 제거
             
             if (missingFields.length > 0) {
-                alert(`Please fill in the following required fields: ` +
+                alert(`다음 필드를 입력해주세요: ` +
                       `${missingFields.join(', ')}`);
                 return;
             }
+            
+            // bbox 검증: 2개 이상일 경우 1개만 선택되도록 확인
+            if (selectedBboxes.length > 1) {
+                const confirmMsg = `bbox가 ${selectedBboxes.length}개 선택되었습니다.\n` +
+                                 `반드시 1개만 선택해야 합니다.\n` +
+                                 `계속하시겠습니까? (첫 번째 bbox만 사용됩니다)`;
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+                // 첫 번째 bbox만 사용
+                selectedBboxes = [selectedBboxes[0]];
+            }
+            
+            // 복수형 명사 검사 및 수정 확인
+            // 일반적인 복수형 패턴: -s, -es, -ies, -ves 등으로 끝나는 단어 (단, 예외 단어 제외)
+            const pluralExceptions = ['glass', 'class', 'pass', 'mass', 'grass', 'gas', 'plus', 'minus', 'bus', 'this', 'his', 'is', 'was', 'has', 'as', 'us'];
+            const checkPlural = (text) => {
+                const words = text.toLowerCase().split(/\s+/);
+                for (const word of words) {
+                    // 단어가 3글자 이상이고, -s, -es, -ies, -ves로 끝나며, 예외 단어가 아닌 경우
+                    if (word.length >= 3 && 
+                        (word.endsWith('s') || word.endsWith('es') || word.endsWith('ies') || word.endsWith('ves')) &&
+                        !pluralExceptions.includes(word)) {
+                        // 단수형이 될 수 있는 단어인지 확인 (일반적인 복수형 패턴)
+                        if (word.endsWith('ies')) {
+                            // cities -> city 같은 패턴
+                            return true;
+                        } else if (word.endsWith('ves')) {
+                            // knives -> knife 같은 패턴
+                            return true;
+                        } else if (word.endsWith('es') && !word.endsWith('ses') && !word.endsWith('ches') && !word.endsWith('shes')) {
+                            // boxes, classes 등
+                            return true;
+                        } else if (word.endsWith('s') && !word.endsWith('ss') && !word.endsWith('us')) {
+                            // 일반적인 -s 복수형
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            };
+            
+            const pluralIssues = [];
+            if (checkPlural(choiceA)) pluralIssues.push(`(a) ${choiceA}`);
+            if (checkPlural(choiceB)) pluralIssues.push(`(b) ${choiceB}`);
+            if (checkPlural(choiceC)) pluralIssues.push(`(c) ${choiceC}`);
+            if (checkPlural(choiceD)) pluralIssues.push(`(d) ${choiceD}`);
+            
+            if (pluralIssues.length > 0) {
+                const confirmMsg = `다음 선지에 복수형 명사가 포함되어 있습니다:\n${pluralIssues.join('\n')}\n\n` +
+                                 `단수형으로 수정하시겠습니까? (취소하면 저장이 중단됩니다)`;
+                if (!confirm(confirmMsg)) {
+                    // 사용자가 취소하면 저장 중단
+                    return;
+                }
+                // 확인만 하고, 실제 수정은 사용자가 직접 해야 함
+                alert('선지를 단수형으로 수정한 후 다시 저장해주세요.');
+                return;
+            }
+            
+            // bbox 좌표 소수점 둘째자리로 통일
+            const roundedBboxes = selectedBboxes.map(bbox => {
+                if (Array.isArray(bbox)) {
+                    return bbox.map(coord => typeof coord === 'number' ? parseFloat(coord.toFixed(2)) : coord);
+                }
+                return bbox;
+            });
             
             // Choice 태그 형식으로 question 생성 (이미 번역된 question이 있으면 그대로 사용)
             let finalQuestion = question;
@@ -1459,7 +1573,8 @@
                 question_ko: questionKo,  // 한글 질문 저장
                 rationale_ko: rationaleKo,  // 한글 근거 저장
                 view: selectedView,
-                selected_bboxes: selectedBboxes
+                selected_bboxes: roundedBboxes,  // 소수점 둘째자리로 통일된 bbox
+                worker_id: workerId  // 작업자 ID 추가
             };
             
             fetch('/api/save', {
@@ -1484,7 +1599,15 @@
                         };
                         localStorage.setItem(`korean_${currentImageData.image_id}`, JSON.stringify(koreanData));
                     }
-                    const message = result.updated ? 'Annotation updated successfully!' : 'Annotation saved successfully!';
+                    let message = result.updated ? 'Annotation updated successfully!' : 'Annotation saved successfully!';
+                    if (result.sheets_saved) {
+                        message += '\n✓ Google Sheets에 저장되었습니다.';
+                    } else if (result.sheets_saved === false) {
+                        message += '\n⚠ Google Sheets 저장 실패 (로컬 저장은 완료)';
+                        if (result.sheets_error) {
+                            message += '\n에러: ' + result.sheets_error;
+                        }
+                    }
                     alert(message);
                     // 저장 후 현재 이미지에 머물러 있음 (다음 이미지로 자동 이동하지 않음)
                     // 사용자가 원할 때 수동으로 이동 가능
@@ -1923,6 +2046,16 @@
                 return;
             }
             
+            // view 타입 가져오기
+            const viewRadios = document.getElementsByName('view');
+            let viewType = 'exo';
+            for (let radio of viewRadios) {
+                if (radio.checked) {
+                    viewType = radio.value;
+                    break;
+                }
+            }
+            
             // 로딩 표시
             const button = event.target;
             const originalText = button.textContent;
@@ -1932,7 +2065,10 @@
             fetch('/api/translate/question', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ question_ko: questionKo })
+                body: JSON.stringify({ 
+                    question_ko: questionKo,
+                    view_type: viewType
+                })
             })
             .then(response => response.json())
             .then(data => {
@@ -2001,6 +2137,16 @@
                 // 선택된 답안 값 가져오기 (한글 근거 생성용)
                 const selectedValue = selectedCheckboxes[0].value; // 첫 번째 선택된 것만 사용
                 
+                // view 타입 가져오기
+                const viewRadios = document.getElementsByName('view');
+                let viewType = 'exo';
+                for (let radio of viewRadios) {
+                    if (radio.checked) {
+                        viewType = radio.value;
+                        break;
+                    }
+                }
+                
                 // 2단계: 이미지 분석 결과를 참고하여 번역
                 return fetch('/api/translate/question_and_choices', {
                     method: 'POST',
@@ -2012,6 +2158,7 @@
                         choice_c: choiceC,
                         choice_d: choiceD,
                         image_id: currentImageData.image_id,
+                        view_type: viewType,
                         selected_choice: selectedValue  // 선택된 답안 전달
                     })
                 });
@@ -2355,14 +2502,43 @@
             }
         }
         
+        // 페이지 로드 시 작업자 ID 자동 로드
+        function loadWorkerId() {
+            // API로 가져오기
+            fetch('/api/worker_id')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.worker_id) {
+                        document.getElementById('workerId').value = data.worker_id;
+                        document.getElementById('workerIdStatus').textContent = '✓ 설정됨';
+                        document.getElementById('workerIdStatus').style.color = '#4CAF50';
+                    } else {
+                        document.getElementById('workerIdStatus').textContent = '⚠ config.py에 WORKER_ID 설정 필요';
+                        document.getElementById('workerIdStatus').style.color = '#ff9800';
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to load worker ID:', error);
+                    document.getElementById('workerIdStatus').textContent = '⚠ 로드 실패';
+                    document.getElementById('workerIdStatus').style.color = '#ff9800';
+                });
+        }
+        
         // 페이지 로드 시 마지막 작업 이미지로 이동
         // loadImage 함수 내부에서 처리하므로 여기서는 첫 이미지만 로드
         // DOM이 준비되면 첫 이미지 로드 (loadImage 함수 내부에서 localStorage 확인)
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function() {
+                loadWorkerId();
                 loadImage(0);
             });
         } else {
+            loadWorkerId();
             loadImage(0);
         }
     </script>

@@ -1,0 +1,102 @@
+[
+  {
+    "image_id": 1424,
+    "image_path": "\\000000001424.jpg",
+    "image_resolution": "640 x 480",
+    "question": "From the perspective of the little girl standing in front of the man, which <ATT>party item</ATT> is <REL>farthest</REL> and located <POS>to the right</POS> of her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(d) flower",
+    "rationale": "The question is ego-centric: The little girl in front of the man has her right side corresponding to the left side of the image. The cake and the camera are positioned in front of her, and the party plate is on her left side. Therefore, the flower is the farthest among the party items.",
+    "bbox": [1.24,258.59,232.54,221.41],
+    "view": "ego"
+  },
+  {
+    "image_id": 1667,
+    "image_path": "\\000000001667.jpg",
+    "image_resolution": "424 x 640",
+    "question": "From the perspective of the little girl, who is the person <REL>closest</REL> <POS>behind her</POS> wearing <ATT>light-colored clothes</ATT>? <choice>(a) checkered shirt man, (b) grey shirt man, (c) black clothes woman, (d) flower vase</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(b) grey shirt man",
+    "rationale": "The question is ego-centric: The flower vase is not a person, so it is excluded first. From the little girl’s perspective, the woman in black clothes is positioned farthest behind her. The man in the checkered shirt is wearing light-colored clothing but is not the closest. Therefore, the man in the grey shirt is the correct answer.",
+    "bbox": [13.66,202.58,164.39,183.84],
+    "view": "ego"
+  },
+  {
+    "image_id": 1822,
+    "image_path": "\\000000001822.jpg",
+    "image_resolution": "640 x 480",
+    "question": "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> on the <POS>right side of the room</POS> is <REL>farthest from me</REL>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(d) tv",
+    "rationale": "The question is ego-centric: From the person’s perspective, sitting on the right side of the large sofa corresponds to sitting on the left side of the large sofa in the image, and the person’s right side aligns with the left side of the image. The large bottle and shoe are located on the person’s left side, while the fan is on the right but is not a square-shaped object. Therefore, the TV is the correct answer.",
+    "bbox": [228.13,159.54,48.55,37.31],
+    "view": "ego"
+  },
+  {
+    "image_id": 1906, 
+    "image_path": "\\000000001906.jpg",
+    "image_resolution": "500 x 333",
+    "question": "When I’m sitting on the far right side of the long sofa, which <ATT>green object</ATT> is the <REL>highest in position</REL> <POS>on the left side</POS>? <choice>(a) frame, (b) audio, (c) green plate, (d) green vase </choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(d) green vase",
+    "rationale": "The question is ego-centric: From the person’s perspective, sitting on the right side of the long sofa corresponds to sitting on the left side of the long sofa in the image, and the person’s left side aligns with the right side of the image. The framed picture is behind the person, and the audio system is on the left but not green. The green plate is not positioned high, so the correct answer is the green vase.",
+    "bbox": [473.58,43.68,14.63,14.93],
+    "view": "ego"
+  },
+  {
+    "image_id": 1947,
+    "image_path": "\\000000001947.jpg",
+    "image_resolution": "500 x 375",
+    "question": "From the perspective of the man sitting in front of the window, which object is the <REL>farthest</REL> <POS>in front of him</POS> and <ATT>rectangular</ATT>? <choice>(a) clock, (b) book, (c) green bottle, (d) red cup</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(b) book",
+    "rationale": "The question is ego‑centric: From the man’s perspective, the front corresponds to the bottom part of the image. The red cup and the green bottle are in front of him but are not rectangular, and the clock is behind him. Therefore, the book is the correct answer.",
+    "bbox": [166.41,251.57,153.78,71.04],
+    "view": "ego"
+  },
+  {
+    "image_id": 1145,
+    "image_path": "\\000000001145.jpg",
+    "image_resolution": "640 x 480",
+    "question": "From the perspective of the woman standing at the counter, which <ATT>rectangular object</ATT> on the dining table <POS>to the left of</POS> her is <REL>closest to her</REL>? <choice>(a) book, (b) bottle, (c) guitar, (d) cup</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) book",
+    "rationale": "The question is ego-centric: The bottle and cup are located on her left side and on the table, but they are not rectangular. The guitar is placed on a table behind her so the correct answer is the book.",
+    "bbox": [238.68,199.53,46.64,17.76],
+    "view": "ego"
+  },
+  {
+    "image_id": 2466,
+    "image_path": "\\000000002466.jpg",
+    "image_resolution": "640 x 360",
+    "question": "From the perspective of the woman, which <ATT>silver object</ATT> <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(c) spoon",
+    "rationale": "The question is ego-centric: From the woman’s perspective, her right side corresponds to the left side of the image. The fork and knife are located on her left side, so they can be excluded. The wine glass, while positioned on the correct side, is made of glass and not a silver object. Therefore, the correct answer is the spoon.",
+    "bbox": [150.29,251.02,96.27,52.69],
+    "view": "ego"
+  },
+  {
+    "image_id": 1180,
+    "image_path": "\\000000001180.jpg",
+    "image_resolution": "426 x 640",
+    "question": "From the perspective of the woman wearing a floral hat, which object <POS>to the right of</POS> her is the <REL>farthest from her</REL> and <ATT>made of bamboo</ATT>? <choice>(a) basket, (b) chair, (c) knife, (d) star-shaped candle</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(a) basket",
+    "rationale": "The question is ego-centric: From the perspective of the woman wearing a floral hat, the right side corresponds to the left side of the image. The chair is positioned behind her, and the knife is close to her. The star-shaped candle is located on her left side. Additionally, among the given choices, the only object made of bamboo is the basket. Therefore, the correct answer is the basket.",
+    "bbox": [62.24,485.78,112.92,51.43],
+    "view": "ego"
+  },
+  {
+    "image_id": 1319,
+    "image_path": "\\000000001319.jpg",
+    "image_resolution": "518 x 600",
+    "question": "From the perspective of the man on the TV, which <REL>is the closest to him</REL> <ATT>furry creature</ATT> <POS>to the right of</POS> him? <choice>(a) cat, (b) kitten, (c) dog, (d) book</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(c) dog",
+    "rationale": "The question is ego-centric: The man's right side corresponds to the left side of the image. The cat is on the man's right side but it is not the closest one. The kitten is not located on his right side. The book is on the right side but is not a living creature. Therefore, the correct answer is the dog.",
+    "bbox": [314.26,139.2,87.24,157.04],
+    "view": "ego"
+  },
+  {
+    "image_id": 1360,
+    "image_path": "\\000000001360.jpg",
+    "image_resolution": "612 x 612",
+    "question": "From the perspective of the dog, which <ATT>white object</ATT> <POS>to the left of</POS> it is the <REL>highest in position</REL>? <choice>(a) plant pot, (b) refrigerator, (c) pliers, (d) plate</choice> And provide the bounding box coordinate of the region related to your answer.",
+    "response": "(d) plate",
+    "rationale": "The question is ego-centric: The dog's left side corresponds to the right side of the image. The plant pot is white but not the highest in position, and the refrigerator is located on the dog's right side. The pliers are not white. Therefore, the correct answer is the plate.",
+    "bbox": [457.39,71.67,55.25,17.32],
+    "view": "ego"
+  }
+]

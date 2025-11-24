@@ -8,7 +8,11 @@ import argparse
 import base64
 import json
 import os
+import threading
+import tempfile
+import shutil
 from io import BytesIO
+from datetime import datetime
 
 from flask import Flask, render_template, request, jsonify, make_response
 from PIL import Image
@@ -23,21 +27,87 @@ except ImportError:
 # Gemini support removed - using OpenAI only
 GEMINI_AVAILABLE = False
 
+# Google Sheets 연동
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GOOGLE_SHEETS_AVAILABLE = True
+    if __name__ == "__main__" or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        print(f"[DEBUG] gspread imported successfully from: {gspread.__file__}")
+except ImportError as e:
+    GOOGLE_SHEETS_AVAILABLE = False
+    print(f"[WARN] gspread not installed. Google Sheets integration will be disabled.")
+    print(f"[WARN] Import error: {e}")
+    print(f"[DEBUG] Python path: {sys.executable}")
+    print(f"[DEBUG] sys.path: {sys.path[:3]}")  # 처음 3개만 출력
+    print("[INFO] Install with: pip install gspread google-auth")
+
 import re
+import sys
+
+# 디버깅: Python 경로 출력
+if __name__ == "__main__" or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    print(f"[DEBUG] Python executable: {sys.executable}")
+    print(f"[DEBUG] Python version: {sys.version}")
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
+# 파일 저장을 위한 잠금 객체 (중복 데이터 방지)
+file_locks = {
+    'exo': threading.Lock(),
+    'ego': threading.Lock()
+}
+
 # API Keys (config.py에서 로드, 없으면 환경변수 또는 기본값 사용)
 try:
     from config import OPENAI_API_KEY, DEFAULT_MODEL
+    # Google Sheets 설정 (선택사항)
+    try:
+        from config import GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_CREDENTIALS_PATH
+    except ImportError:
+        GOOGLE_SHEETS_SPREADSHEET_ID = None
+        GOOGLE_SHEETS_CREDENTIALS_PATH = None
+    # 작업자 ID 설정 (선택사항)
+    try:
+        from config import WORKER_ID
+    except ImportError:
+        WORKER_ID = None
 except ImportError:
     import os
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'openai')
+    GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv('GOOGLE_SHEETS_SPREADSHEET_ID', None)
+    GOOGLE_SHEETS_CREDENTIALS_PATH = os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH', None)
+    WORKER_ID = os.getenv('WORKER_ID', None)
     if not OPENAI_API_KEY:
         print("[WARN] OpenAI API key not found. Please create config.py or set OPENAI_API_KEY environment variable.")
+
+# 작업자 ID 출력
+if WORKER_ID:
+    print(f"[INFO] 작업자 ID: {WORKER_ID}")
+else:
+    print("[WARN] 작업자 ID가 설정되지 않았습니다. config.py에 WORKER_ID를 설정하세요.")
+
+# Google Sheets 클라이언트 초기화
+google_sheets_client = None
+if GOOGLE_SHEETS_AVAILABLE and GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_SHEETS_CREDENTIALS_PATH:
+    try:
+        if os.path.exists(GOOGLE_SHEETS_CREDENTIALS_PATH):
+            scopes = ['https://www.googleapis.com/auth/spreadsheets']
+            credentials = Credentials.from_service_account_file(
+                GOOGLE_SHEETS_CREDENTIALS_PATH, scopes=scopes
+            )
+            google_sheets_client = gspread.authorize(credentials)
+            print(f"[INFO] Google Sheets 연동 활성화: {GOOGLE_SHEETS_SPREADSHEET_ID}")
+        else:
+            print(f"[WARN] Google Sheets credentials 파일을 찾을 수 없습니다: {GOOGLE_SHEETS_CREDENTIALS_PATH}")
+    except Exception as e:
+        print(f"[WARN] Google Sheets 초기화 실패: {e}")
+        google_sheets_client = None
+elif GOOGLE_SHEETS_AVAILABLE:
+    print("[INFO] Google Sheets 연동 비활성화 (설정 필요)")
 
 class COCOWebAnnotator:
     """Web-based COCO annotation tool for creating question-response pairs."""
@@ -245,12 +315,17 @@ def find_by_image_id(image_id):
 @app.route('/')
 def index():
     """Render the main annotation interface."""
-    response = make_response(render_template('index.html'))
+    response = make_response(render_template('index.html', worker_id=WORKER_ID))
     # 브라우저 캐시 방지
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+@app.route('/api/worker_id', methods=['GET'])
+def get_worker_id():
+    """Get worker ID from config."""
+    return jsonify({'worker_id': WORKER_ID})
 
 @app.route('/api/exo_image_indices', methods=['GET'])
 def get_exo_image_indices():
@@ -400,6 +475,7 @@ def translate_question():
     """Translate Korean question to English using GPT-5."""
     data = request.json
     question_ko = data.get('question_ko', '').strip()
+    view_type = data.get('view_type', 'exo')  # 'exo' or 'ego'
     
     if not question_ko:
         return jsonify({'success': False, 'error': 'Question (Korean) is required'}), 400
@@ -414,8 +490,78 @@ def translate_question():
         
         client = OpenAI(api_key=OPENAI_API_KEY)
         
-        # exo_data_sample.json 형식 참고하여 프롬프트 작성
-        prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format:
+        # view_type에 따라 다른 프롬프트 사용
+        if view_type == 'ego':
+            # ego_data_sample.json 형식 참고
+            prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format for EGO-CENTRIC questions:
+
+CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS:
+[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+
+CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
+1. If the Korean question contains "~관점에서" (from the perspective of ~):
+   → Translate to: "From the perspective of [person/object], ..."
+   Example: "작은 소녀의 관점에서" → "From the perspective of the little girl, ..."
+
+2. If the Korean question contains "내가" or "I'm" (when I am in the image):
+   → Translate to: "When I'm [action/position], ..."
+   Examples:
+   - "내가 소파 오른쪽에 앉아 있을 때" → "When I'm sitting on the right side of the sofa, ..."
+   - "내가 의자에 앉아 있을 때" → "When I'm sitting on the chair, ..."
+   - "내가 테이블 앞에 서 있을 때" → "When I'm standing in front of the table, ..."
+
+CRITICAL TAG USAGE RULES:
+
+1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
+   - Examples: "farthest", "closest", "second-closest", "highest in position"
+   - DO NOT use for objects or locations
+
+2. <POS> tag - Use ONLY for POSITION/LOCATION information from the perspective:
+   - Examples: "on the left side", "on the right side", "in front of", "behind", "to the left of", "to the right of"
+   - DO NOT use for object attributes or relationships
+   - DO NOT use generic phrases like "in the image"
+   - Remember: In ego-centric questions, "left/right" are from the person's perspective
+
+3. <ATT> tag - Use ONLY for ATTRIBUTES or TARGET GROUPS:
+   - Examples: "round object", "green object", "white object", "rectangular object", "party item", "furry creature"
+   - Use for describing WHAT object/group is being asked about
+   
+🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
+   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
+   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
+   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
+   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
+   - WRONG: "which white object" (missing <ATT> tag)
+   - CORRECT: "which <ATT>white object</ATT>"
+   - WRONG: "which person" (missing <ATT> tag)
+   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
+
+Reference examples from ego_data_sample.json:
+
+Example 1: "From the perspective of the little girl standing in front of the man, which <ATT>party item</ATT> is <REL>farthest</REL> and located <POS>to the right</POS> of her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 2: "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> on the <POS>right side of the room</POS> is <REL>farthest from me</REL>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 3: "From the perspective of the woman, which <ATT>silver object</ATT> <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Korean question: {question_ko}
+
+Translate to English following the EXACT format above. Make sure:
+- Use "From the perspective of ~" if Korean contains "~관점에서"
+- Use "When I'm ~" if Korean contains "내가" or "I'm"
+- <REL> is used ONLY for relationship terms (farthest, closest, etc.)
+- <POS> is used ONLY for position/location information from the person's perspective (on the left side, on the right side, etc.)
+- <ATT> is used ONLY for attributes or target groups (round object, green object, white object, person, etc.)
+- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
+- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
+- 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
+- All tags have meaningful content inside them
+- <choice> tag comes before "And provide..." phrase
+- DO NOT use generic phrases like "in the image" for <POS> tag
+- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags"""
+        else:
+            # exo_data_sample.json 형식 참고
+            prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format:
 
 CORRECT FORMAT:
 [Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
@@ -432,28 +578,47 @@ CRITICAL TAG USAGE RULES:
    - DO NOT use generic phrases like "in the image"
 
 3. <ATT> tag - Use ONLY for ATTRIBUTES or TARGET GROUPS:
-   - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item"
+   - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item", "white object", "round object"
    - Use for describing WHAT object/group is being asked about
+   
+🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
+   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
+   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
+   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
+   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
+   - WRONG: "which white object" (missing <ATT> tag)
+   - CORRECT: "which <ATT>white object</ATT>"
+   - WRONG: "which person" (missing <ATT> tag)
+   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
 
-Reference examples:
-- "Which <ATT>red object</ATT> is <REL>farthest</REL> from the flag <POS>in the center of the table</POS>?"
-- "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the man?"
-- "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table?"
+Reference examples from exo_data_sample.json:
+- "<REL>Second-closest</REL> to the refrigerator a countertop located <POS>in the center</POS> of the image, which object is it <ATT>among the items</ATT>? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
+- "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
 
 Korean question: {question_ko}
 
 Translate to English following the EXACT format above. Make sure:
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
-- <ATT> is used ONLY for attributes or target groups (red object, among the items, etc.)
+- <ATT> is used ONLY for attributes or target groups (red object, white object, among the items, person, etc.)
+- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
+- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
+- 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
 - All tags have meaningful content inside them
 - <choice> tag comes before "And provide..." phrase
-- DO NOT use generic phrases like "in the image" for <POS> tag"""
+- DO NOT use generic phrases like "in the image" for <POS> tag
+- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags"""
+        
+        # view_type에 따라 다른 시스템 메시지 사용
+        if view_type == 'ego':
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) EGO-CENTRIC questions. CRITICAL RULES: 1) Use 'From the perspective of ~' for '~관점에서', 2) Use 'When I'm ~' for '내가', 3) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 4) <POS> tag ONLY for position/location from person's perspective (on the left side, on the right side, etc.), 5) <ATT> tag ONLY for attributes/target groups (round object, green object, white object, person, etc.), 6) 🚨 MANDATORY: If Korean contains ANY attribute word (color, shape, material, '사람', '객체', '물체'), you MUST use <ATT> tag, 7) 🚨 MANDATORY: If Korean ends with '~사람은?' or '~객체는?', you MUST include <ATT> tag, 8) Tags MUST contain actual meaningful content, 9) Format: [Question with tags] <choice>...</choice> And provide..., 10) DO NOT use generic phrases like 'in the image' for <POS> tag, 11) DOUBLE-CHECK: Verify ALL attribute descriptions are wrapped in <ATT> tags."
+        else:
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, white object, among the items, person, etc.), 4) 🚨 MANDATORY: If Korean contains ANY attribute word (color, shape, material, '사람', '객체', '물체'), you MUST use <ATT> tag, 5) 🚨 MANDATORY: If Korean ends with '~사람은?' or '~객체는?', you MUST include <ATT> tag, 6) Tags MUST contain actual meaningful content, 7) Format: [Question with tags] <choice>...</choice> And provide..., 8) DO NOT use generic phrases like 'in the image' for <POS> tag, 9) DOUBLE-CHECK: Verify ALL attribute descriptions are wrapped in <ATT> tags."
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide..., 6) DO NOT use generic phrases like 'in the image' for <POS> tag."},
+                {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
@@ -464,6 +629,15 @@ Translate to English following the EXACT format above. Make sure:
         # 태그 검증
         if '<ATT>' not in translated_question and '<POS>' not in translated_question and '<REL>' not in translated_question:
             return jsonify({'success': False, 'error': 'Translation must include at least one of <ATT>, <POS>, or <REL> tags'}), 400
+        
+        # ATT 태그 누락 검증 강화: 한국어 질문에 속성 단어가 있는데 ATT 태그가 없는 경우
+        attribute_keywords_ko = ['흰색', '빨간색', '파란색', '초록색', '검은색', '노란색', '원형', '정사각형', '직사각형', '사람', '객체', '물체', '색', '모양', '재질']
+        question_has_attribute = any(keyword in question_ko for keyword in attribute_keywords_ko)
+        if question_has_attribute and '<ATT>' not in translated_question:
+            return jsonify({
+                'success': False, 
+                'error': f'ATT tag is missing! Korean question contains attribute words but translation lacks <ATT> tag. Please ensure all attribute descriptions are wrapped in <ATT> tags. Translation: {translated_question[:200]}...'
+            }), 400
         
         if '<choice>' not in translated_question:
             return jsonify({'success': False, 'error': 'Translation must include <choice> tag'}), 400
@@ -1202,6 +1376,7 @@ def translate_question_and_choices():
     choice_c = data.get('choice_c', '').strip()
     choice_d = data.get('choice_d', '').strip()
     image_id = data.get('image_id', None)  # 이미지 ID 추가
+    view_type = data.get('view_type', 'exo')  # 'exo' or 'ego'
     
     if not question_ko:
         return jsonify({'success': False, 'error': 'Question (Korean) is required'}), 400
@@ -1240,7 +1415,103 @@ IMAGE ANALYSIS CONTEXT:
 
 Use this image analysis to better understand the context and spatial relationships mentioned in the Korean question. The analysis includes detailed features like colors, positions, orientations, and spatial relationships of objects in the image. Use this information to create more accurate <ATT>, <POS>, and <REL> tags that match the actual visual content."""
         
-        prompt = f"""Translate the following Korean question and multiple choice options to English. You MUST follow this EXACT format:{image_context}
+        # view_type에 따라 다른 프롬프트 사용
+        if view_type == 'ego':
+            prompt = f"""Translate the following Korean question and multiple choice options to English. You MUST follow this EXACT format for EGO-CENTRIC questions:{image_context}
+
+CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS:
+[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+
+CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
+1. If the Korean question contains "~관점에서" (from the perspective of ~):
+   → Translate to: "From the perspective of [person/object], ..."
+   Example: "작은 소녀의 관점에서" → "From the perspective of the little girl, ..."
+
+2. If the Korean question contains "내가" or "I'm" (when I am in the image):
+   → Translate to: "When I'm [action/position], ..."
+   Examples:
+   - "내가 소파 오른쪽에 앉아 있을 때" → "When I'm sitting on the right side of the sofa, ..."
+   - "내가 의자에 앉아 있을 때" → "When I'm sitting on the chair, ..."
+   - "내가 테이블 앞에 서 있을 때" → "When I'm standing in front of the table, ..."
+
+CRITICAL TAG USAGE RULES:
+
+1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
+   - Examples: "farthest", "closest", "second-closest", "highest in position"
+   - DO NOT use for objects or locations
+
+2. <POS> tag - Use ONLY for POSITION/LOCATION information from the perspective:
+   - Examples: "on the left side", "on the right side", "in front of", "behind", "to the left of", "to the right of"
+   - DO NOT use for object attributes or relationships
+   - DO NOT use generic phrases like "in the image"
+   - Remember: In ego-centric questions, "left/right" are from the person's perspective
+
+3. <ATT> tag - Use ONLY for ATTRIBUTES or TARGET GROUPS:
+   - Examples: "round object", "green object", "white object", "rectangular object", "party item", "furry creature"
+   - Use for describing WHAT object/group is being asked about
+   
+🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
+   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
+   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
+   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
+   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
+   - WRONG: "which white object" (missing <ATT> tag)
+   - CORRECT: "which <ATT>white object</ATT>"
+   - WRONG: "which person" (missing <ATT> tag)
+   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
+
+4. GENERAL RULES:
+   - Tags MUST contain actual meaningful content (NOT empty like <ATT></ATT>)
+   - Tags should be embedded naturally within the question sentence, not at the end
+   - The <choice> tag MUST come BEFORE "And provide..." phrase
+   - DO NOT use generic phrases like "in the image" for <POS> tag
+   - If a phrase contains both attribute and location, split them appropriately
+
+Reference examples from ego_data_sample.json:
+
+Example 1: "From the perspective of the little girl standing in front of the man, which <ATT>party item</ATT> is <REL>farthest</REL> and located <POS>to the right</POS> of her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 2: "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> on the <POS>right side of the room</POS> is <REL>farthest from me</REL>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Example 3: "From the perspective of the woman, which <ATT>silver object</ATT> <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer."
+
+Korean question: {question_ko}
+
+Korean choices:
+(a) {choice_a}
+(b) {choice_b}
+(c) {choice_c}
+(d) {choice_d}
+
+CRITICAL - Choice Translation Format:
+- Use concise, intuitive adjective+noun or noun+noun format (NOT full sentences)
+- Examples:
+  * "a person in a black shirt" → "black shirt person"
+  * "a person wearing glasses" → "glasses person"
+  * "a cup on the table" → "table cup" or "cup"
+  * "a red chair" → "red chair"
+  * "a man with a blue t-shirt" → "blue t-shirt man"
+- DO NOT use full sentences like "a person who is wearing a black shirt"
+- DO NOT use articles "a" or "the" unless necessary
+- Keep choices short and intuitive
+
+Translate the Korean question and choices to English following the EXACT format above. Make sure:
+- Use "From the perspective of ~" if Korean contains "~관점에서"
+- Use "When I'm ~" if Korean contains "내가" or "I'm"
+- <REL> is used ONLY for relationship terms (farthest, closest, etc.)
+- <POS> is used ONLY for position/location information from the person's perspective (on the left side, on the right side, etc.)
+- <ATT> is used ONLY for attributes or target groups (round object, green object, white object, person, etc.)
+- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
+- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
+- 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
+- All tags have meaningful content inside them
+- Tags are naturally embedded in the question sentence
+- <choice> tag comes before "And provide..." phrase
+- DO NOT use generic phrases like "in the image" for <POS> tag
+- Choices are in concise adjective+noun or noun+noun format
+- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags"""
+        else:
+            prompt = f"""Translate the following Korean question and multiple choice options to English. You MUST follow this EXACT format:{image_context}
 
 CORRECT FORMAT:
 [Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
@@ -1261,11 +1532,21 @@ CRITICAL TAG USAGE RULES:
    - WRONG: "<ATT>flag in the center of the table</ATT>" (location info should be <POS>)
 
 3. <ATT> tag - Use ONLY for ATTRIBUTES or TARGET GROUPS:
-   - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item", "object that can hold water", "non-edible item"
+   - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item", "object that can hold water", "non-edible item", "white object", "round object", "person"
    - Use for describing WHAT object/group is being asked about
    - CORRECT: "Which <ATT>red object</ATT> is..."
    - CORRECT: "<ATT>Among the items</ATT> on the table..."
    - WRONG: "<ATT>flag in the center of the table</ATT>" (contains location, should split: flag <POS>in the center of the table</POS>)
+   
+🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
+   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
+   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
+   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
+   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
+   - WRONG: "which white object" (missing <ATT> tag)
+   - CORRECT: "which <ATT>white object</ATT>"
+   - WRONG: "which person" (missing <ATT> tag)
+   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
 
 4. GENERAL RULES:
    - Tags MUST contain actual meaningful content (NOT empty like <ATT></ATT>)
@@ -1307,17 +1588,27 @@ CRITICAL - Choice Translation Format:
 Translate the Korean question and choices to English following the EXACT format above. Make sure:
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
-- <ATT> is used ONLY for attributes or target groups (red object, among the items, etc.)
+- <ATT> is used ONLY for attributes or target groups (red object, white object, among the items, person, etc.)
+- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
+- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
+- 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
 - All tags have meaningful content inside them
 - Tags are naturally embedded in the question sentence
 - <choice> tag comes before "And provide..." phrase
 - DO NOT use generic phrases like "in the image" for <POS> tag
-- Choices are in concise adjective+noun or noun+noun format"""
+- Choices are in concise adjective+noun or noun+noun format
+- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags"""
+        
+        # view_type에 따라 다른 시스템 메시지 사용
+        if view_type == 'ego':
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) EGO-CENTRIC questions. CRITICAL RULES: 1) Use 'From the perspective of ~' for '~관점에서', 2) Use 'When I'm ~' for '내가', 3) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 4) <POS> tag ONLY for position/location from person's perspective (on the left side, on the right side, etc.), 5) <ATT> tag ONLY for attributes/target groups (round object, green object, etc.), 6) Tags MUST contain actual meaningful content, 7) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 8) DO NOT use generic phrases like 'in the image' for <POS> tag, 9) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."
+        else:
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 6) DO NOT use generic phrases like 'in the image' for <POS> tag, 7) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 6) DO NOT use generic phrases like 'in the image' for <POS> tag, 7) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."},
+                {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
@@ -1332,6 +1623,15 @@ Translate the Korean question and choices to English following the EXACT format 
         
         if not (has_valid_att or has_valid_pos or has_valid_rel):
             return jsonify({'success': False, 'error': 'Translation must include at least one of <ATT>, <POS>, or <REL> tags with actual content inside them'}), 400
+        
+        # ATT 태그 누락 검증 강화: 한국어 질문에 속성 단어가 있는데 ATT 태그가 없는 경우
+        attribute_keywords_ko = ['흰색', '빨간색', '파란색', '초록색', '검은색', '노란색', '원형', '정사각형', '직사각형', '사람', '객체', '물체', '색', '모양', '재질']
+        question_has_attribute = any(keyword in question_ko for keyword in attribute_keywords_ko)
+        if question_has_attribute and not has_valid_att:
+            return jsonify({
+                'success': False, 
+                'error': f'ATT tag is missing! Korean question contains attribute words but translation lacks <ATT> tag. Please ensure all attribute descriptions are wrapped in <ATT> tags. Translation: {translated_question[:200]}...'
+            }), 400
         
         if '<choice>' not in translated_question:
             return jsonify({'success': False, 'error': 'Translation must include <choice> tag'}), 400
@@ -1472,10 +1772,39 @@ Current question: {question}
 Correct answer: {response}
 """
         
-        prompt = f"""Translate the following Korean rationale to English. Follow these CRITICAL requirements:{image_context}{elimination_guide}
+        # view_type에 따라 다른 프롬프트 사용
+        if view_type == 'ego':
+            # ego_data_sample.json 형식 참고
+            prompt = f"""Translate the following Korean rationale to English. Follow these CRITICAL requirements for EGO-CENTRIC rationales:{image_context}{elimination_guide}
+
+REQUIREMENTS FOR EGO-CENTRIC RATIONALES:
+1. The rationale MUST start with "The question is ego-centric:"
+2. Use elimination method format: explain why incorrect choices are excluded, then explain why the correct answer is right
+3. The translation must be at least 2 sentences long
+4. Make it natural, grammatically correct, and detailed
+5. Use the image analysis context to create accurate descriptions of spatial relationships and object positions FROM THE PERSON'S PERSPECTIVE
+6. DO NOT include any bounding box coordinates (x1, y1, x2, y2) or coordinate information in the rationale
+7. When the Korean rationale mentions choice letters (a, b, c, d), translate them to the corresponding English choice text from the question
+8. CRITICAL: End the rationale with a simple "Therefore" statement. DO NOT add additional explanatory clauses after "Therefore" such as "as it is...", "because it is...", "since it is...", or any descriptive phrases that repeat information already stated
+9. IMPORTANT: When describing spatial relationships, always clarify the perspective (e.g., "From the person's perspective, the right side corresponds to the left side of the image")
+
+Reference examples from ego_data_sample.json:
+
+Example 1: "The question is ego-centric: The little girl in front of the man has her right side corresponding to the left side of the image. The cake and the camera are positioned in front of her, and the party plate is on her left side. Therefore, the flower is the farthest among the party items."
+
+Example 2: "The question is ego-centric: From the person's perspective, sitting on the right side of the large sofa corresponds to sitting on the left side of the large sofa in the image, and the person's right side aligns with the left side of the image. The large bottle and shoe are located on the person's left side, while the fan is on the right but is not a square-shaped object. Therefore, the TV is the correct answer."
+
+Example 3: "The question is ego-centric: From the woman's perspective, her right side corresponds to the left side of the image. The fork and knife are located on her left side, so they can be excluded. The wine glass, while positioned on the correct side, is made of glass and not a silver object. Therefore, the correct answer is the spoon."
+
+Korean rationale: {rationale_ko}
+
+Translate to English following the format and style of ego_data_sample.json examples."""
+        else:
+            # exo_data_sample.json 형식 참고
+            prompt = f"""Translate the following Korean rationale to English. Follow these CRITICAL requirements:{image_context}{elimination_guide}
 
 REQUIREMENTS:
-1. The rationale MUST start with "The question is {question_type}:"
+1. The rationale MUST start with "The question is exo-centric:"
 2. Use elimination method format: explain why incorrect choices are excluded, then explain why the correct answer is right
 3. The translation must be at least 2 sentences long
 4. Make it natural, grammatically correct, and detailed
@@ -1483,6 +1812,12 @@ REQUIREMENTS:
 6. DO NOT include any bounding box coordinates (x1, y1, x2, y2) or coordinate information in the rationale
 7. When the Korean rationale mentions choice letters (a, b, c, d), translate them to the corresponding English choice text from the question
 8. CRITICAL: End the rationale with a simple "Therefore" statement. DO NOT add additional explanatory clauses after "Therefore" such as "as it is...", "because it is...", "since it is...", or any descriptive phrases that repeat information already stated
+
+Reference examples from exo_data_sample.json:
+
+Example 1: "The question is exo-centric: The sink is placed immediately adjacent to the refrigerator, making it the closest. The vase sits slightly forward on the counter, farther than the sink but clearly closer than the orange bag at the far right edge and the red chair in the front seating area. Therefore the vase is second-closest."
+
+Example 2: "The question is exo-centric: The laptop and the cell phone are located on the sofa near the brown-haired man, while the handbag is placed on the floor near his feet. The coke bottle is also on the floor, but it is cylindrical, not square-shaped. Therefore the handbag is the only square-shaped object on the floor."
 
 Korean rationale: {rationale_ko}
 
@@ -1895,14 +2230,23 @@ def save_annotation():
     relative_image_path = f"/{image_filename}"
     
     # bbox 처리: bbox가 있으면 처리, 없으면 None (선택사항)
+    # bbox 좌표를 소수점 둘째자리로 통일
     selected_bboxes = data.get('selected_bboxes', [])
     if selected_bboxes and len(selected_bboxes) > 0:
-        if len(selected_bboxes) == 1:
+        # 소수점 둘째자리로 통일
+        def round_bbox(bbox):
+            if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                return [round(float(coord), 2) if isinstance(coord, (int, float)) else coord for coord in bbox]
+            return bbox
+        
+        rounded_bboxes = [round_bbox(bbox) for bbox in selected_bboxes]
+        
+        if len(rounded_bboxes) == 1:
             # 단일 bbox인 경우 배열로 감싸지 않고 직접 저장
-            bbox_value = selected_bboxes[0]
+            bbox_value = rounded_bboxes[0]
         else:
             # 여러 bbox인 경우 배열로 저장
-            bbox_value = selected_bboxes
+            bbox_value = rounded_bboxes
     else:
         # bbox가 없으면 None으로 저장
         bbox_value = None
@@ -1914,6 +2258,8 @@ def save_annotation():
         'question': data['question'],
         'response': data['response'],
         'rationale': data.get('rationale', ''),
+        'question_ko': data.get('question_ko', ''),  # 한글 질문 추가
+        'rationale_ko': data.get('rationale_ko', ''),  # 한글 근거 추가
         'view': view_type,
         'bbox': bbox_value  # 단일 bbox는 배열로 감싸지 않음
     }
@@ -1922,47 +2268,61 @@ def save_annotation():
     output_path = annotator.output_json_path_exo if view_type == 'exo' else annotator.output_json_path_ego
     other_output_path = annotator.output_json_path_ego if view_type == 'exo' else annotator.output_json_path_exo
     
-    # 해당 view 타입의 annotations 로드
-    view_annotations = []
-    if os.path.exists(output_path):
-        try:
-            with open(output_path, 'r', encoding='utf-8') as f:
-                view_annotations = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            view_annotations = []
+    # 파일 잠금을 사용하여 동시 접근 방지 (중복 데이터 방지)
+    lock = file_locks[view_type]
     
-    # 다른 view 타입 파일에서도 같은 image_id가 있으면 제거 (view 타입 변경 시)
-    other_view_annotations = []
-    if os.path.exists(other_output_path):
-        try:
-            with open(other_output_path, 'r', encoding='utf-8') as f:
-                other_view_annotations = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            other_view_annotations = []
-    
-    # 다른 view 타입 파일에서 같은 image_id 제거
-    other_view_annotations = [ann for ann in other_view_annotations if ann.get('image_id') != data['image_id']]
-    
-    # 현재 view 타입 파일에서 업데이트 또는 추가
-    found = False
-    for i, ann in enumerate(view_annotations):
-        if ann.get('image_id') == data['image_id']:
-            view_annotations[i] = annotation  # 덮어쓰기
-            found = True
-            break
-    
-    if not found:
-        view_annotations.append(annotation)  # 새로 추가
-    
-    # Save to file
-    try:
-        # 출력 디렉토리 생성
-        output_dir = os.path.dirname(output_path)
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
+    with lock:  # 잠금 획득 (다른 작업자가 저장 중이면 대기)
+        # 해당 view 타입의 annotations 로드 (잠금 내에서 다시 읽어 최신 데이터 보장)
+        view_annotations = []
+        if os.path.exists(output_path):
+            try:
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    view_annotations = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                view_annotations = []
         
-        # 현재 view 타입 파일 저장 (bbox는 한 줄로 저장)
-        with open(output_path, 'w', encoding='utf-8') as f:
+        # 중복 체크: 같은 image_id가 이미 있는지 확인
+        found = False
+        for i, ann in enumerate(view_annotations):
+            if ann.get('image_id') == data['image_id']:
+                view_annotations[i] = annotation  # 덮어쓰기
+                found = True
+                break
+        
+        if not found:
+            # 중복 확인: 혹시 모를 중복 방지
+            if not any(ann.get('image_id') == data['image_id'] for ann in view_annotations):
+                view_annotations.append(annotation)  # 새로 추가
+            else:
+                # 이미 존재하는 경우 업데이트
+                for i, ann in enumerate(view_annotations):
+                    if ann.get('image_id') == data['image_id']:
+                        view_annotations[i] = annotation
+                        found = True
+                        break
+        
+        # 다른 view 타입 파일 처리 (다른 view 타입 파일도 잠금 필요)
+        other_lock = file_locks['ego' if view_type == 'exo' else 'exo']
+        with other_lock:
+            other_view_annotations = []
+            if os.path.exists(other_output_path):
+                try:
+                    with open(other_output_path, 'r', encoding='utf-8') as f:
+                        other_view_annotations = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    other_view_annotations = []
+            
+            # 다른 view 타입 파일에서 같은 image_id 제거
+            other_view_annotations = [ann for ann in other_view_annotations if ann.get('image_id') != data['image_id']]
+        
+        # Save to file (원자적 쓰기: 임시 파일에 쓰고 rename)
+        try:
+            # 출력 디렉토리 생성
+            output_dir = os.path.dirname(output_path)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+            
+            # 현재 view 타입 파일 저장 (원자적 쓰기)
             json_str = json.dumps(view_annotations, indent=2, ensure_ascii=False)
             # bbox 배열을 한 줄로 변경: "bbox": [\n      숫자,\n      ...\n    ] -> "bbox": [숫자, ...]
             json_str = re.sub(
@@ -1971,32 +2331,266 @@ def save_annotation():
                 json_str,
                 flags=re.MULTILINE
             )
-            f.write(json_str)
-        
-        # 다른 view 타입 파일도 저장 (같은 image_id 제거된 버전)
-        if other_view_annotations != [] or os.path.exists(other_output_path):
-            other_output_dir = os.path.dirname(other_output_path)
-            if other_output_dir and not os.path.exists(other_output_dir):
-                os.makedirs(other_output_dir, exist_ok=True)
-            with open(other_output_path, 'w', encoding='utf-8') as f:
-                json_str = json.dumps(other_view_annotations, indent=2, ensure_ascii=False)
+            
+            # 임시 파일에 쓰고 원자적으로 rename (중복 방지)
+            temp_fd, temp_path = tempfile.mkstemp(dir=output_dir, suffix='.json.tmp', text=True)
+            try:
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                    f.write(json_str)
+                # 원자적 쓰기: 임시 파일을 최종 파일로 rename
+                shutil.move(temp_path, output_path)
+            except Exception:
+                # 실패 시 임시 파일 정리
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                raise
+            
+            # 다른 view 타입 파일도 저장 (같은 image_id 제거된 버전)
+            if other_view_annotations != [] or os.path.exists(other_output_path):
+                other_output_dir = os.path.dirname(other_output_path)
+                if other_output_dir and not os.path.exists(other_output_dir):
+                    os.makedirs(other_output_dir, exist_ok=True)
+                
+                other_json_str = json.dumps(other_view_annotations, indent=2, ensure_ascii=False)
                 # bbox 배열을 한 줄로 변경
-                json_str = re.sub(
+                other_json_str = re.sub(
                     r'"bbox":\s*\[\s*\n\s*([^\]]+?)\s*\n\s*\]',
                     lambda m: f'"bbox": [{re.sub(r"\\s+", " ", m.group(1).strip())}]',
-                    json_str,
+                    other_json_str,
                     flags=re.MULTILINE
                 )
-                f.write(json_str)
+                
+                # 다른 view 타입 파일도 원자적 쓰기 (다시 잠금 필요)
+                with other_lock:
+                    other_temp_fd, other_temp_path = tempfile.mkstemp(dir=other_output_dir, suffix='.json.tmp', text=True)
+                    try:
+                        with os.fdopen(other_temp_fd, 'w', encoding='utf-8') as f:
+                            f.write(other_json_str)
+                        shutil.move(other_temp_path, other_output_path)
+                    except Exception:
+                        try:
+                            os.unlink(other_temp_path)
+                        except:
+                            pass
+                        raise
+        
+        except (IOError, OSError) as e:
+            return jsonify({'error': f'Failed to save: {e}'}), 500
         
         # 전체 annotations도 업데이트 (다음 로드 시 반영)
         annotator._reload_annotations()
         
-        response_data = {'success': True, 'updated': found}
+        # Google Sheets에 저장 (실패해도 로컬 저장은 성공한 것으로 처리)
+        # worker_id는 요청에서 가져오거나 config에서 자동으로 사용
+        worker_id = data.get('worker_id') or WORKER_ID
+        sheets_success = False
+        sheets_error = None
+        if google_sheets_client and worker_id:
+            try:
+                sheets_success = save_to_google_sheets(
+                    worker_id=worker_id,
+                    annotation=annotation,
+                    image_info=image_info
+                )
+                if not sheets_success:
+                    sheets_error = "Google Sheets 저장 실패 (알 수 없는 오류)"
+            except Exception as e:
+                sheets_error = str(e)
+                print(f"[WARN] Google Sheets 저장 실패: {e}")
+                import traceback
+                print(f"[WARN] 상세 에러:\n{traceback.format_exc()}")
+        elif not google_sheets_client:
+            sheets_error = "Google Sheets 클라이언트가 초기화되지 않았습니다"
+            print("[WARN] Google Sheets 클라이언트가 초기화되지 않았습니다.")
+        elif not worker_id:
+            sheets_error = "작업자 ID가 없습니다"
+            print("[WARN] 작업자 ID가 없어 Google Sheets에 저장하지 않습니다. config.py에 WORKER_ID를 설정하거나 요청에 worker_id를 포함하세요.")
+        
+        response_data = {
+            'success': True, 
+            'updated': found,
+            'sheets_saved': sheets_success,
+            'sheets_error': sheets_error if not sheets_success else None
+        }
         
         return jsonify(response_data)
-    except (IOError, OSError) as e:
-        return jsonify({'error': f'Failed to save: {e}'}), 500
+
+
+def save_to_google_sheets(worker_id, annotation, image_info):
+    """
+    Google Sheets에 어노테이션 저장
+    
+    Args:
+        worker_id: 작업자 ID (예: "worker001")
+        annotation: 어노테이션 딕셔너리
+        image_info: 이미지 정보 딕셔너리
+        
+    Returns:
+        성공 여부 (bool)
+    """
+    if not google_sheets_client:
+        return False
+    
+    try:
+        # 스프레드시트 열기
+        spreadsheet = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        
+        # 작업자별 시트 가져오기 또는 생성
+        sheet_name = worker_id
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            # 시트가 없으면 생성
+            worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+            # 헤더 추가
+            headers = [
+                '저장시간', 'Image ID', 'Image Path', 'Image Resolution', 
+                'Question', 'Response', 'Rationale', 'View', 'Bbox'
+            ]
+            worksheet.append_row(headers)
+            # 헤더 스타일 설정 (선택사항)
+            try:
+                worksheet.format('A1:I1', {'textFormat': {'bold': True}})
+            except:
+                pass
+        
+        # Bbox를 문자열로 변환
+        bbox_str = ''
+        if annotation.get('bbox'):
+            if isinstance(annotation['bbox'], list):
+                if isinstance(annotation['bbox'][0], list):
+                    # 여러 bbox
+                    bbox_str = '; '.join([str(b) for b in annotation['bbox']])
+                else:
+                    # 단일 bbox (배열)
+                    bbox_str = str(annotation['bbox'])
+            else:
+                bbox_str = str(annotation['bbox'])
+        
+        # 행 데이터 준비
+        row_data = [
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # 저장시간
+            annotation.get('image_id', ''),
+            annotation.get('image_path', ''),
+            annotation.get('image_resolution', ''),
+            annotation.get('question', ''),
+            annotation.get('response', ''),
+            annotation.get('rationale', ''),
+            annotation.get('view', ''),
+            bbox_str
+        ]
+        
+        # 같은 image_id가 이미 있는지 확인 (업데이트)
+        existing_rows = worksheet.get_all_values()
+        row_to_update = None
+        for idx, row in enumerate(existing_rows[1:], start=2):  # 헤더 제외
+            if len(row) > 1 and str(row[1]) == str(annotation.get('image_id', '')):
+                row_to_update = idx
+                break
+        
+        if row_to_update:
+            # 기존 행 업데이트
+            worksheet.update(f'A{row_to_update}:I{row_to_update}', [row_data])
+        else:
+            # 새 행 추가
+            worksheet.append_row(row_data)
+        
+        return True
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Google Sheets 저장 중 오류: {e}")
+        import traceback
+        print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
+        # 에러를 다시 발생시켜서 상위에서 처리하도록 함
+        raise
+
+
+def remove_duplicate_annotations(json_path):
+    """
+    JSON 파일에서 중복된 어노테이션 제거 (같은 image_id가 여러 개 있는 경우)
+    가장 최근 것만 유지 (또는 첫 번째 것만 유지)
+    
+    Args:
+        json_path: JSON 파일 경로
+        
+    Returns:
+        제거된 중복 개수
+    """
+    if not os.path.exists(json_path):
+        return 0
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            annotations = json.load(f)
+        
+        # image_id를 키로 하는 딕셔너리로 변환 (중복 시 마지막 것만 유지)
+        seen = {}
+        duplicates_removed = 0
+        
+        for ann in annotations:
+            image_id = ann.get('image_id')
+            if image_id is not None:
+                if image_id in seen:
+                    duplicates_removed += 1
+                seen[image_id] = ann
+        
+        # 중복이 있으면 파일 저장
+        if duplicates_removed > 0:
+            # 딕셔너리를 리스트로 변환
+            unique_annotations = list(seen.values())
+            
+            # 원자적 쓰기로 저장
+            output_dir = os.path.dirname(json_path)
+            json_str = json.dumps(unique_annotations, indent=2, ensure_ascii=False)
+            # bbox 배열을 한 줄로 변경
+            json_str = re.sub(
+                r'"bbox":\s*\[\s*\n\s*([^\]]+?)\s*\n\s*\]',
+                lambda m: f'"bbox": [{re.sub(r"\\s+", " ", m.group(1).strip())}]',
+                json_str,
+                flags=re.MULTILINE
+            )
+            
+            temp_fd, temp_path = tempfile.mkstemp(dir=output_dir, suffix='.json.tmp', text=True)
+            try:
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                    f.write(json_str)
+                shutil.move(temp_path, json_path)
+            except Exception:
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                raise
+            
+            print(f"[INFO] {json_path}: {duplicates_removed}개 중복 어노테이션 제거됨")
+        
+        return duplicates_removed
+    except Exception as e:
+        print(f"[ERROR] {json_path} 중복 제거 실패: {e}")
+        return 0
+
+
+@app.route('/api/remove_duplicates', methods=['POST'])
+def remove_duplicates():
+    """중복 어노테이션 제거 API"""
+    try:
+        exo_count = remove_duplicate_annotations(annotator.output_json_path_exo)
+        ego_count = remove_duplicate_annotations(annotator.output_json_path_ego)
+        
+        # 전체 annotations도 업데이트
+        annotator._reload_annotations()
+        
+        return jsonify({
+            'success': True,
+            'exo_removed': exo_count,
+            'ego_removed': ego_count,
+            'total_removed': exo_count + ego_count
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to remove duplicates: {e}'}), 500
 
 
 def create_template():
@@ -2526,7 +3120,17 @@ def main():
     print(f"Ego annotations will be saved to: {annotator.output_json_path_ego}")
     
     # 멀티스레드 모드로 실행 (타임아웃 방지)
-    app.run(host=args.host, port=args.port, debug=True, threaded=True)
+    # Google Sheets 연동 상태 확인
+    if GOOGLE_SHEETS_AVAILABLE:
+        print(f"[INFO] Google Sheets 연동: 사용 가능")
+        if google_sheets_client:
+            print(f"[INFO] Google Sheets 클라이언트: 초기화 완료")
+        else:
+            print(f"[WARN] Google Sheets 클라이언트: 초기화 실패 (설정 확인 필요)")
+    else:
+        print(f"[WARN] Google Sheets 연동: 사용 불가")
+    
+    app.run(host=args.host, port=args.port, debug=True, threaded=True, use_reloader=False)
 
 
 if __name__ == "__main__":

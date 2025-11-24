@@ -36,7 +36,6 @@ mscoco/filtered_annotations.json
 # Output files (개인 작업 파일 - 필요시 주석 해제)
 mscoco/web_annotations_exo.json
 mscoco/web_annotations_ego.json
-mscoco/web_annotations_exo_gpt5.json
 
 # Worker management files (개인 작업 파일)
 workers.json
@@ -52,13 +51,6 @@ batch_results.json
 test_batch_results.json
 *_batch_results.json
 
-# Batch files (로컬 실행용)
-*.bat
-
 # Git temporary files
 *.patch
-
-# GPT-5 annotation generation logs
-generate_annotations_gpt5.log
-generate_annotations_gpt5_error.log
 .gitignore
