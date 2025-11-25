@@ -2387,6 +2387,8 @@ def save_annotation():
         worker_id = data.get('worker_id') or WORKER_ID
         sheets_success = False
         sheets_error = None
+        revision_updated = False
+        
         if google_sheets_client and worker_id:
             try:
                 sheets_success = save_to_google_sheets(
@@ -2396,6 +2398,31 @@ def save_annotation():
                 )
                 if not sheets_success:
                     sheets_error = "Google Sheets 저장 실패 (알 수 없는 오류)"
+                
+                # 불통 상태이고 수정여부가 아직 업데이트되지 않았다면 업데이트
+                # 검수 상태 확인을 위해 시트에서 읽어오기
+                sheet_data = read_from_google_sheets(worker_id)
+                print(f"[DEBUG] 시트 데이터에서 Image ID {image_id} 검색 중... (총 {len(sheet_data)}개 행)")
+                for row in sheet_data:
+                    row_image_id = row.get('Image ID', '') or row.get('image_id', '')
+                    if str(row_image_id) == str(image_id):
+                        review_status = row.get('검수', '') or row.get('검수 상태', '')
+                        revision_status = row.get('수정여부', '') or row.get('수정 여부', '')
+                        print(f"[DEBUG] Image ID {image_id} 발견 - 검수: {review_status}, 수정여부: {revision_status}")
+                        if review_status == '불통' and revision_status != '수정완료' and revision_status != '수정 완료':
+                            # 수정여부 열 업데이트
+                            print(f"[DEBUG] 수정여부 업데이트 시도 중...")
+                            revision_updated = update_revision_status(worker_id, image_id, '수정완료')
+                            if revision_updated:
+                                print(f"[INFO] Image ID {image_id}의 수정여부를 '수정완료'로 업데이트했습니다.")
+                            else:
+                                print(f"[WARN] Image ID {image_id}의 수정여부 업데이트 실패")
+                        else:
+                            print(f"[DEBUG] 업데이트 불필요 - 검수: {review_status}, 수정여부: {revision_status}")
+                        break
+                else:
+                    print(f"[WARN] Image ID {image_id}를 시트 데이터에서 찾을 수 없습니다.")
+                        
             except Exception as e:
                 sheets_error = str(e)
                 print(f"[WARN] Google Sheets 저장 실패: {e}")
@@ -2412,7 +2439,8 @@ def save_annotation():
             'success': True, 
             'updated': found,
             'sheets_saved': sheets_success,
-            'sheets_error': sheets_error if not sheets_success else None
+            'sheets_error': sheets_error if not sheets_success else None,
+            'revision_updated': revision_updated
         }
         
         return jsonify(response_data)
@@ -2508,6 +2536,137 @@ def save_to_google_sheets(worker_id, annotation, image_info):
         raise
 
 
+def read_from_google_sheets(worker_id):
+    """
+    Google Sheets에서 작업자의 어노테이션 데이터 읽기
+    
+    Args:
+        worker_id: 작업자 ID (예: "test")
+        
+    Returns:
+        리스트: 각 행의 데이터 딕셔너리 리스트
+        각 딕셔너리는 {'image_id': ..., '검수': ..., '비고': ..., '수정여부': ..., ...} 형태
+    """
+    if not google_sheets_client:
+        return []
+    
+    try:
+        # 스프레드시트 열기
+        spreadsheet = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        
+        # 작업자별 시트 가져오기
+        sheet_name = worker_id
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            print(f"[WARN] 시트 '{sheet_name}'를 찾을 수 없습니다.")
+            return []
+        
+        # 모든 데이터 가져오기
+        all_values = worksheet.get_all_values()
+        if len(all_values) < 2:  # 헤더만 있거나 비어있음
+            return []
+        
+        # 헤더 추출
+        headers = all_values[0]
+        
+        # 헤더 인덱스 찾기
+        header_indices = {}
+        for idx, header in enumerate(headers):
+            header_indices[header] = idx
+        
+        # 데이터 행 처리
+        result = []
+        for row in all_values[1:]:  # 헤더 제외
+            if len(row) == 0 or not row[1]:  # Image ID가 없으면 스킵
+                continue
+            
+            row_data = {}
+            for header, idx in header_indices.items():
+                if idx < len(row):
+                    row_data[header] = row[idx]
+                else:
+                    row_data[header] = ''
+            
+            result.append(row_data)
+        
+        return result
+        
+    except Exception as e:
+        print(f"[ERROR] Google Sheets 읽기 중 오류: {e}")
+        import traceback
+        print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
+        return []
+
+
+def update_revision_status(worker_id, image_id, status='수정완료'):
+    """
+    Google Sheets의 수정여부 열 업데이트
+    
+    Args:
+        worker_id: 작업자 ID
+        image_id: 이미지 ID
+        status: 업데이트할 상태 (기본값: '수정 완료')
+        
+    Returns:
+        성공 여부 (bool)
+    """
+    if not google_sheets_client:
+        return False
+    
+    try:
+        spreadsheet = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        worksheet = spreadsheet.worksheet(worker_id)
+        
+        # 모든 데이터 가져오기
+        all_values = worksheet.get_all_values()
+        if len(all_values) < 2:
+            return False
+        
+        # 헤더에서 열 인덱스 찾기
+        headers = all_values[0]
+        print(f"[DEBUG] 헤더 목록: {headers}")
+        image_id_col = None
+        revision_status_col = None
+        
+        for idx, header in enumerate(headers):
+            header_clean = header.strip()
+            if header_clean == 'Image ID' or header_clean == 'image_id':
+                image_id_col = idx
+                print(f"[DEBUG] Image ID 열 발견: 인덱스 {idx}")
+            if header_clean == '수정여부' or header_clean == '수정 여부':
+                revision_status_col = idx
+                print(f"[DEBUG] 수정여부 열 발견: 인덱스 {idx}")
+        
+        if image_id_col is None:
+            print("[WARN] Image ID 열을 찾을 수 없습니다.")
+            print(f"[WARN] 사용 가능한 헤더: {headers}")
+            return False
+        
+        if revision_status_col is None:
+            print("[WARN] 수정여부 열을 찾을 수 없습니다.")
+            print(f"[WARN] 사용 가능한 헤더: {headers}")
+            return False
+        
+        # 해당 image_id 찾아서 업데이트
+        for row_idx, row in enumerate(all_values[1:], start=2):  # 헤더 제외, 1-based index
+            if len(row) > image_id_col and str(row[image_id_col]) == str(image_id):
+                # 수정여부 열 업데이트 (update_cell 사용: row, col은 1-based)
+                # revision_status_col은 0-based이므로 +1 해서 1-based로 변환
+                worksheet.update_cell(row_idx, revision_status_col + 1, status)
+                print(f"[INFO] Image ID {image_id}의 수정여부를 '{status}'로 업데이트했습니다. (셀: 행{row_idx}, 열{revision_status_col + 1})")
+                return True
+        
+        print(f"[WARN] Image ID {image_id}를 찾을 수 없습니다.")
+        return False
+        
+    except Exception as e:
+        print(f"[ERROR] 수정여부 업데이트 중 오류: {e}")
+        import traceback
+        print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
+        return False
+
+
 def remove_duplicate_annotations(json_path):
     """
     JSON 파일에서 중복된 어노테이션 제거 (같은 image_id가 여러 개 있는 경우)
@@ -2571,6 +2730,64 @@ def remove_duplicate_annotations(json_path):
     except Exception as e:
         print(f"[ERROR] {json_path} 중복 제거 실패: {e}")
         return 0
+
+
+@app.route('/api/sync_from_sheets', methods=['GET'])
+def sync_from_sheets():
+    """
+    Google Sheets에서 현재 작업자의 데이터 동기화
+    """
+    try:
+        worker_id = WORKER_ID
+        if not worker_id:
+            return jsonify({'error': '작업자 ID가 설정되지 않았습니다.'}), 400
+        
+        # 구글 시트에서 데이터 읽기
+        sheet_data = read_from_google_sheets(worker_id)
+        
+        # 검수 상태별로 분류
+        passed_images = []  # 통과
+        failed_images = []  # 불통
+        completed_images = []  # 납품 완료
+        
+        for row in sheet_data:
+            image_id = row.get('Image ID', '') or row.get('image_id', '')
+            review_status = row.get('검수', '') or row.get('검수 상태', '')
+            note = row.get('비고', '') or row.get('검수 의견', '')
+            revision_status = row.get('수정여부', '') or row.get('수정 여부', '')
+            
+            if not image_id:
+                continue
+            
+            image_info = {
+                'image_id': int(image_id) if image_id.isdigit() else image_id,
+                'review_status': review_status,
+                'note': note,
+                'revision_status': revision_status,
+                'row_data': row
+            }
+            
+            if review_status == '통과':
+                passed_images.append(image_info)
+            elif review_status == '불통':
+                failed_images.append(image_info)
+            elif review_status == '납품 완료':
+                completed_images.append(image_info)
+        
+        return jsonify({
+            'success': True,
+            'worker_id': worker_id,
+            'passed': passed_images,
+            'failed': failed_images,
+            'completed': completed_images,
+            'total': len(sheet_data)
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] 구글 시트 동기화 중 오류: {e}")
+        import traceback
+        print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
+        return jsonify({'error': f'동기화 실패: {str(e)}'}), 500
 
 
 @app.route('/api/remove_duplicates', methods=['POST'])

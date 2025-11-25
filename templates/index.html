@@ -574,12 +574,28 @@
     <div id="mainUI">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
             <h1 style="margin: 0; flex: 1;">MS-COCO Annotation Tool (Web Version)</h1>
-            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-                <label for="workerId" style="font-size: 0.9rem; margin: 0; font-weight: bold;">작업자 ID: 
+            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: nowrap;">
+                <label for="workerId" style="font-size: 0.9rem; margin: 0; font-weight: bold; white-space: nowrap;">작업자 ID: 
                     <span id="workerIdStatus" style="color: #4CAF50; font-weight: bold;"></span></label>
-                <input id="workerId" type="text" placeholder="config.py에서 자동 로드..." readonly style="padding: 8px 12px; font-size: 0.85rem; min-width: 150px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <input id="workerId" type="text" placeholder="config.py에서 자동 로드..." readonly style="padding: 8px 12px; font-size: 0.85rem; width: 150px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                
+                <label for="searchId" style="margin: 0; font-size: 0.9rem; font-weight: bold; white-space: nowrap;">Image ID:</label>
+                <input id="searchId" type="number" placeholder="ex 184613" style="width: 100px; padding: 8px 12px; font-size: 0.85rem; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;">
+                <button onclick="jumpToId()" style="flex-shrink: 0; padding: 8px 16px; font-size: 0.85rem; background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%); color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">Go</button>
+                
+                <button onclick="syncFromSheets()" id="syncBtn" style="flex-shrink: 0; padding: 8px 14px; font-size: 0.85rem; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">API 동기화</button>
+                
+                <div id="revisionDropdownContainer" style="display: none;">
+                    <label for="revisionDropdown" style="margin: 0; margin-right: 4px; font-size: 0.85rem; font-weight: bold; white-space: nowrap;">수정요청:</label>
+                    <select id="revisionDropdown" onchange="jumpToRevisionImage()" style="padding: 8px 12px; font-size: 0.85rem; border: 2px solid #ff9800; border-radius: 8px; background: white; cursor: pointer; min-width: 180px;">
+                        <option value="">수정요청 이미지 선택...</option>
+                    </select>
+                </div>
             </div>
         </div>
+        
+        <!-- 검수 상태 알림 표시 영역 -->
+        <div id="reviewStatusAlert" style="display: none; margin-bottom: 10px; padding: 12px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
         
         <div class="container">
         <div class="image-panel">
@@ -659,7 +675,7 @@
             
             <!-- 오른쪽 패널: 기존 폼들 -->
             <div class="control-panel-right">
-                <!-- === 추가: Bbox 표시/숨김 토글과 Image ID를 같은 줄에 배치 === -->
+                <!-- Bbox 표시/숨김 토글과 Draw Bbox 버튼 -->
                 <div class="form-group" style="margin-bottom: 8px;">
                     <div style="display: flex; gap: 6px; align-items: center; flex-wrap: nowrap;">
                         <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 8px; border: 2px solid #4CAF50; flex-shrink: 0; box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);">
@@ -667,11 +683,6 @@
                             <label for="bboxToggle" style="font-size: 0.75rem; font-weight: 700; margin: 0; cursor: pointer; white-space: nowrap; user-select: none; color: #2e7d32;">Bbox</label>
                         </div>
                         <button id="drawBboxBtn" onclick="toggleDrawMode()" style="flex-shrink: 0; padding: 6px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">Draw Bbox</button>
-                        <label for="searchId" style="margin: 0; margin-right: 4px; font-size: 0.75rem; flex-shrink: 0;">Image ID:</label>
-                        <div style="flex: 1; min-width: 0; display: flex; gap: 4px;">
-                            <input id="searchId" type="number" placeholder="ex 184613" style="flex: 1; min-width: 0; padding: 8px 10px; font-size: 0.75rem; border: 2px solid #e0e0e0; border-radius: 6px; transition: all 0.3s ease;">
-                            <button onclick="jumpToId()" style="flex-shrink: 0; padding: 6px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">Go</button>
-                        </div>
                     </div>
                 </div>  
                 <div class="form-group" style="margin-bottom: 8px;">
@@ -721,7 +732,7 @@
                     <div style="display: flex; gap: 4px; flex-wrap: wrap;">
                         <button class="btn-nav" onclick="previousImage()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Previous</button>
                         <button class="btn-nav" onclick="nextImage()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Next</button>
-                        <button class="btn-save" onclick="saveAnnotation()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Save</button>
+                        <button id="saveBtn" class="btn-save" onclick="saveAnnotation()" style="flex: 1; min-width: 70px; padding: 6px 10px; font-size: 0.8rem;">Save</button>
                     </div>
                 </div>
             </div>
@@ -991,6 +1002,11 @@
                     updateBboxDisplay();
                     updateStatus();
                     drawBboxes();
+                    
+                    // 검수 상태 UI 업데이트
+                    if (currentImageData && currentImageData.image_id) {
+                        updateReviewStatusUI(currentImageData.image_id);
+                    }
                 })
                 .catch(error => {
                     console.error('Error:', error);
@@ -1450,6 +1466,15 @@
         }
 
         function saveAnnotation() {
+            // 납품 완료 상태인지 확인
+            if (currentImageData && reviewStatusData[currentImageData.image_id]) {
+                const reviewInfo = reviewStatusData[currentImageData.image_id];
+                if (reviewInfo.status === '납품 완료') {
+                    alert('납품 완료된 이미지는 수정할 수 없습니다.');
+                    return;
+                }
+            }
+            
             // 새로운 입력 필드에서 값 가져오기
             const questionKo = document.getElementById('questionKo').value.trim();
             const choiceA = document.getElementById('choiceA').value.trim();
@@ -1480,7 +1505,7 @@
             const missingFields = [];
             if (!question) missingFields.push('question');
             if (!response) missingFields.push('response');
-            if (!choiceA || !choiceB || !choiceC || !choiceD) missingFields.push('choices (a, b, c, d)');
+            // 객관선지 필수 검증 제거
             if (!selectedView) missingFields.push('view');
             if (selectedBboxes.length === 0) missingFields.push('bbox');
             // 작업자 ID는 서버에서 config.py의 WORKER_ID를 자동으로 사용하므로 필수 검증 제거
@@ -1608,6 +1633,37 @@
                             message += '\n에러: ' + result.sheets_error;
                         }
                     }
+                    console.log('[DEBUG] revision_updated:', result.revision_updated);
+                    if (result.revision_updated) {
+                        message += '\n✓ 수정여부가 "수정완료"로 업데이트되었습니다.';
+                        message += '\n✓ 검수자가 확인 중입니다.';
+                        // 검수 상태 데이터 갱신
+                        if (reviewStatusData[currentImageData.image_id]) {
+                            reviewStatusData[currentImageData.image_id].revision_status = '수정완료';
+                        }
+                        // UI 다시 업데이트 - 검수자 확인 중 메시지 표시
+                        const alertDiv = document.getElementById('reviewStatusAlert');
+                        console.log('[DEBUG] alertDiv:', alertDiv);
+                        if (alertDiv) {
+                            alertDiv.style.display = 'block';
+                            alertDiv.style.background = 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+                            alertDiv.style.border = '2px solid #4CAF50';
+                            alertDiv.style.color = '#2e7d32';
+                            alertDiv.innerHTML = '<strong>✓ 수정 완료</strong> - 검수자가 확인 중입니다.';
+                            console.log('[DEBUG] 검수자 확인 중 메시지 표시 완료');
+                        } else {
+                            console.error('[ERROR] reviewStatusAlert 요소를 찾을 수 없습니다.');
+                        }
+                        // SAVE 버튼 상태 업데이트
+                        const saveBtn = document.getElementById('saveBtn');
+                        if (saveBtn) {
+                            saveBtn.disabled = false;
+                            saveBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+                            saveBtn.textContent = 'Save';
+                        }
+                    } else {
+                        console.log('[DEBUG] revision_updated가 false입니다.');
+                    }
                     alert(message);
                     // 저장 후 현재 이미지에 머물러 있음 (다음 이미지로 자동 이동하지 않음)
                     // 사용자가 원할 때 수동으로 이동 가능
@@ -1660,69 +1716,7 @@
         attach();
         })();
 
-        // Auto-save function
-        function autoSave() {
-            // 새로운 입력 필드에서 값 가져오기
-            const questionKo = document.getElementById('questionKo').value.trim();
-            const choiceA = document.getElementById('choiceA').value.trim();
-            const choiceB = document.getElementById('choiceB').value.trim();
-            const choiceC = document.getElementById('choiceC').value.trim();
-            const choiceD = document.getElementById('choiceD').value.trim();
-            const rationaleKo = document.getElementById('rationaleKo').value.trim();
-            
-            // 기존 필드에서도 값 가져오기
-            const question = document.getElementById('question').value.trim() || questionKo;
-            const response = document.getElementById('response').value.trim();
-            const rationale = document.getElementById('rationale').value.trim() || rationaleKo;
-            
-            // Get selected view
-            const viewRadios = document.getElementsByName('view');
-            let selectedView = '';
-            for (let radio of viewRadios) {
-                if (radio.checked) {
-                    selectedView = radio.value;
-                    break;
-                }
-            }
-            
-            // Choice 태그 형식으로 question 생성
-            let finalQuestion = question;
-            if (choiceA && choiceB && choiceC && choiceD && !finalQuestion.includes('<choice>')) {
-                finalQuestion += ` <choice>(a) ${choiceA}, (b) ${choiceB}, (c) ${choiceC}, (d) ${choiceD}</choice> And provide the bounding box coordinate of the region related to your answer.`;
-            }
-            
-            // Only auto-save if all required fields are filled
-            if (currentImageData && question && response && 
-                choiceA && choiceB && choiceC && choiceD &&
-                selectedView && selectedBboxes.length > 0) {
-                const data = {
-                    image_id: currentImageData.image_id,
-                    question: finalQuestion,
-                    response: response,
-                    rationale: rationale,
-                    view: selectedView,
-                    selected_bboxes: selectedBboxes
-                };
-                
-                fetch('/api/save', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        // 자동 저장 시에도 현재 이미지 인덱스 저장
-                        if (currentIndex !== undefined && currentIndex !== null) {
-                            localStorage.setItem('lastImageIndex', currentIndex.toString());
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Auto-save error:', error);
-                });
-            }
-        }
+        // Auto-save function 제거됨 - SAVE 버튼을 눌렀을 때만 저장
 
         function focusBboxByIndex(idx) {
             bboxElements.forEach(el => el.classList.remove('focused'));
@@ -1797,6 +1791,209 @@
             focusBboxByIndex(candidates[0].i);
         }
 
+        // 구글 시트 동기화 관련 전역 변수
+        let reviewStatusData = {}; // image_id -> {status, note, revision_status}
+        let failedImages = []; // 수정요청 이미지 목록
+        
+        function syncFromSheets() {
+            const btn = document.getElementById('syncBtn');
+            const originalText = btn.textContent;
+            btn.textContent = '동기화 중...';
+            btn.disabled = true;
+            
+            fetch('/api/sync_from_sheets')
+            .then(response => response.json())
+            .then(data => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                
+                if (data.error) {
+                    alert('동기화 실패: ' + data.error);
+                    return;
+                }
+                
+                // 검수 상태 데이터 저장
+                reviewStatusData = {};
+                failedImages = [];
+                
+                // 통과 이미지
+                data.passed.forEach(img => {
+                    reviewStatusData[img.image_id] = {
+                        status: '통과',
+                        note: '',
+                        revision_status: img.revision_status
+                    };
+                });
+                
+                // 불통 이미지
+                data.failed.forEach(img => {
+                    reviewStatusData[img.image_id] = {
+                        status: '불통',
+                        note: img.note || '',
+                        revision_status: img.revision_status
+                    };
+                    failedImages.push({
+                        image_id: img.image_id,
+                        note: img.note || ''
+                    });
+                });
+                
+                // 납품 완료 이미지
+                data.completed.forEach(img => {
+                    reviewStatusData[img.image_id] = {
+                        status: '납품 완료',
+                        note: '',
+                        revision_status: img.revision_status
+                    };
+                });
+                
+                // 수정요청 드롭다운 업데이트
+                updateRevisionDropdown();
+                
+                // 현재 이미지의 검수 상태 업데이트
+                if (currentImageData) {
+                    updateReviewStatusUI(currentImageData.image_id);
+                }
+                
+                // 알럿창 제거 - 콘솔에만 출력
+                console.log(`동기화 완료! 통과: ${data.passed.length}개, 불통: ${data.failed.length}개, 납품 완료: ${data.completed.length}개`);
+            })
+            .catch(error => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                console.error('동기화 오류:', error);
+                alert('동기화 중 오류가 발생했습니다.');
+            });
+        }
+        
+        function updateRevisionDropdown() {
+            const container = document.getElementById('revisionDropdownContainer');
+            const dropdown = document.getElementById('revisionDropdown');
+            
+            if (failedImages.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            
+            container.style.display = 'flex';
+            dropdown.innerHTML = '<option value="">수정요청 이미지 선택...</option>';
+            
+            failedImages.forEach(img => {
+                const option = document.createElement('option');
+                option.value = img.image_id;
+                option.textContent = `Image ID: ${img.image_id}`; // Image ID만 표시
+                dropdown.appendChild(option);
+            });
+        }
+        
+        function jumpToRevisionImage() {
+            const dropdown = document.getElementById('revisionDropdown');
+            const imageId = dropdown.value;
+            
+            if (!imageId) {
+                return;
+            }
+            
+            const imageIdNum = parseInt(imageId, 10);
+            if (isNaN(imageIdNum)) {
+                return;
+            }
+            
+            fetch(`/api/find/${imageIdNum}`)
+            .then(r => {
+                if (!r.ok) {
+                    throw new Error(`HTTP error! status: ${r.status}`);
+                }
+                return r.json();
+            })
+            .then(d => {
+                if (d.error) {
+                    console.error('API error:', d.error);
+                    alert(`Error: ${d.error}`);
+                    return;
+                }
+                if (d.index !== undefined) {
+                    loadImage(d.index);
+                    // 드롭다운 선택 초기화
+                    dropdown.value = '';
+                } else {
+                    alert('해당 ID를 찾지 못했습니다.');
+                }
+            })
+            .catch(error => {
+                console.error('이미지 로드 오류:', error);
+                alert('이미지 로드 중 오류가 발생했습니다.');
+            });
+        }
+        
+        function updateReviewStatusUI(imageId) {
+            const reviewInfo = reviewStatusData[imageId];
+            const alertDiv = document.getElementById('reviewStatusAlert');
+            const saveBtn = document.getElementById('saveBtn');
+            
+            if (!reviewInfo) {
+                // 검수 상태 정보가 없으면 기본 상태
+                alertDiv.style.display = 'none';
+                saveBtn.disabled = false;
+                saveBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+                saveBtn.textContent = 'Save';
+                return;
+            }
+            
+            if (reviewInfo.status === '통과') {
+                // 통과: bbox만 태깅 확인, SAVE 버튼 색상 변경
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)';
+                alertDiv.style.border = '2px solid #2196F3';
+                alertDiv.style.color = '#1565C0';
+                alertDiv.innerHTML = '<strong>✓ 통과</strong> - bbox 태깅만 확인해주세요.';
+                saveBtn.disabled = false;
+                saveBtn.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+                saveBtn.textContent = 'Save';
+            } else if (reviewInfo.status === '불통') {
+                // 불통 상태 확인
+                const revisionStatus = reviewInfo.revision_status || '';
+                if (revisionStatus === '수정완료' || revisionStatus === '수정 완료') {
+                    // 수정완료인 경우: 검수자가 확인 중입니다 메시지 표시
+                    alertDiv.style.display = 'block';
+                    alertDiv.style.background = 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+                    alertDiv.style.border = '2px solid #4CAF50';
+                    alertDiv.style.color = '#2e7d32';
+                    alertDiv.innerHTML = '<strong>✓ 수정 완료</strong> - 검수자가 확인 중입니다.';
+                    saveBtn.disabled = false;
+                    saveBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+                    saveBtn.textContent = 'Save';
+                } else {
+                    // 수정완료가 아닌 경우: 비고 내용 표시, UPDATE 버튼으로 변경
+                    alertDiv.style.display = 'block';
+                    alertDiv.style.background = 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)';
+                    alertDiv.style.border = '2px solid #ff9800';
+                    alertDiv.style.color = '#e65100';
+                    const note = reviewInfo.note || '수정이 필요합니다.';
+                    alertDiv.innerHTML = `<strong>⚠ 불통</strong> - ${note}`;
+                    saveBtn.disabled = false;
+                    saveBtn.style.background = 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)';
+                    saveBtn.textContent = 'UPDATE'; // UPDATE 버튼으로 텍스트 변경
+                }
+            } else if (reviewInfo.status === '납품 완료') {
+                // 납품 완료: SAVE 버튼 비활성화
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = 'linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%)';
+                alertDiv.style.border = '2px solid #9e9e9e';
+                alertDiv.style.color = '#616161';
+                alertDiv.innerHTML = '<strong>✓ 납품 완료</strong> - 수정할 수 없습니다.';
+                saveBtn.disabled = true;
+                saveBtn.style.background = 'linear-gradient(135deg, #9e9e9e 0%, #757575 100%)';
+                saveBtn.style.cursor = 'not-allowed';
+                saveBtn.textContent = 'Save';
+            } else {
+                alertDiv.style.display = 'none';
+                saveBtn.disabled = false;
+                saveBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+                saveBtn.textContent = 'Save';
+            }
+        }
+
         function jumpToId() {
             const v = parseInt(document.getElementById('searchId').value, 10);
             if (isNaN(v)) {
@@ -1825,13 +2022,7 @@
             .catch(() => alert('검색 중 오류가 발생했습니다.'));
         }
 
-        // Save on unload
-        window.addEventListener('beforeunload', (e) => {
-            autoSave();
-        });
-
-        // Auto-save every 30 seconds
-        setInterval(autoSave, 30000);
+        // 자동저장 기능 제거됨 - SAVE 버튼을 눌렀을 때만 저장
         
         // 질문 자동 생성 함수들
         let currentQuestionCandidates = [];
