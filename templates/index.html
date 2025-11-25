@@ -1797,15 +1797,22 @@
         
         function syncFromSheets() {
             const btn = document.getElementById('syncBtn');
-            const originalText = btn.textContent;
-            btn.textContent = '동기화 중...';
-            btn.disabled = true;
+            const isManualSync = btn !== null; // 수동 동기화인지 자동 동기화인지 확인
+            let originalText = '';
+            
+            if (btn) {
+                originalText = btn.textContent;
+                btn.textContent = '동기화 중...';
+                btn.disabled = true;
+            }
             
             fetch('/api/sync_from_sheets')
             .then(response => response.json())
             .then(data => {
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
                 
                 if (data.error) {
                     alert('동기화 실패: ' + data.error);
@@ -1859,10 +1866,15 @@
                 console.log(`동기화 완료! 통과: ${data.passed.length}개, 불통: ${data.failed.length}개, 납품 완료: ${data.completed.length}개`);
             })
             .catch(error => {
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
                 console.error('동기화 오류:', error);
-                alert('동기화 중 오류가 발생했습니다.');
+                // 자동 동기화일 때는 알럿창을 띄우지 않음 (콘솔에만 출력)
+                if (isManualSync) {
+                    alert('동기화 중 오류가 발생했습니다.');
+                }
             });
         }
         
@@ -2727,10 +2739,22 @@
             document.addEventListener('DOMContentLoaded', function() {
                 loadWorkerId();
                 loadImage(0);
+                
+                // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 20분(1200000ms)마다 실행
+                syncFromSheets(); // 즉시 한 번 실행
+                setInterval(function() {
+                    syncFromSheets();
+                }, 20 * 60 * 1000); // 20분 = 1200000ms
             });
         } else {
             loadWorkerId();
             loadImage(0);
+            
+            // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 20분(1200000ms)마다 실행
+            syncFromSheets(); // 즉시 한 번 실행
+            setInterval(function() {
+                syncFromSheets();
+            }, 20 * 60 * 1000); // 20분 = 1200000ms
         }
     </script>
 </body>
