@@ -533,6 +533,94 @@ def get_image(index):
             img_base64 = base64.b64encode(buffer.getvalue()).decode()
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Failed to load image: {e}'}), 500
+    # 납품완료된 이미지 개수 계산 (남은 이미지 계산을 위해)
+    # ego_images 폴더 기준으로 계산
+    completed_count = 0
+    passed_count = 0
+    total_ego_images = 0
+    remaining_count = 0
+    
+    # ego_images 폴더의 실제 파일 개수 계산
+    ego_images_folder_path = annotator.ego_images_folder
+    print(f"[DEBUG] ego_images 폴더 경로 확인: {ego_images_folder_path}")
+    print(f"[DEBUG] ego_images 폴더 존재 여부: {os.path.exists(ego_images_folder_path)}")
+    
+    if os.path.exists(ego_images_folder_path):
+        try:
+            ego_files = [f for f in os.listdir(ego_images_folder_path) 
+                         if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp'))]
+            total_ego_images = len(ego_files)
+            print(f"[DEBUG] ego_images 폴더의 이미지 개수: {total_ego_images}")
+        except Exception as e:
+            print(f"[ERROR] ego_images 폴더 읽기 실패: {e}")
+            total_ego_images = 0
+    else:
+        print(f"[WARN] ego_images 폴더를 찾을 수 없습니다: {ego_images_folder_path}")
+        total_ego_images = 0
+    
+    if google_sheets_client and worker_id:
+        try:
+            sheet_data = read_from_google_sheets(worker_id)
+            print(f"[DEBUG] 구글시트에서 읽은 전체 이미지 개수: {len(sheet_data)}")
+            
+            if len(sheet_data) > 0:
+                # 구글시트에서 view가 'ego'인 이미지만 필터링
+                ego_sheet_images = 0
+                for row in sheet_data:
+                    row_image_id = row.get('Image ID', '') or row.get('image_id', '')
+                    row_view = row.get('view', '') or row.get('View', '')
+                    
+                    # view가 'ego'인 이미지만 처리
+                    if row_image_id and row_view.lower() == 'ego':
+                        ego_sheet_images += 1
+                        review_status = row.get('검수', '') or row.get('검수 상태', '')
+                        if review_status == '납품 완료':
+                            completed_count += 1
+                        elif review_status == '통과':
+                            passed_count += 1
+                
+                # ego_images 폴더 개수와 구글시트의 ego 이미지 개수 중 큰 값 사용
+                if total_ego_images > 0:
+                    # 남은 이미지 개수 = ego_images 폴더 이미지 - 통과 - 납품완료
+                    remaining_count = total_ego_images - passed_count - completed_count
+                else:
+                    # 폴더 개수를 알 수 없으면 구글시트의 ego 이미지 개수 사용
+                    remaining_count = ego_sheet_images - passed_count - completed_count
+                
+                if remaining_count < 0:
+                    remaining_count = 0
+                
+                print(f"[DEBUG] 남은 이미지 계산: ego폴더={total_ego_images}, 구글시트ego={ego_sheet_images}, 통과={passed_count}, 납품완료={completed_count}, 남은={remaining_count}")
+            else:
+                # 구글시트 데이터가 없으면 ego_images 폴더 개수 사용
+                if total_ego_images > 0:
+                    remaining_count = total_ego_images
+                    print(f"[INFO] 구글시트 데이터가 없습니다. ego_images 폴더 개수 사용: {remaining_count}")
+                else:
+                    print(f"[WARN] 구글시트 데이터도 없고 ego_images 폴더도 찾을 수 없습니다.")
+        except Exception as e:
+            print(f"[WARN] 납품완료/통과 개수 계산 중 오류: {e}")
+            import traceback
+            print(f"[WARN] 상세 에러:\n{traceback.format_exc()}")
+            # 에러 발생 시 ego_images 폴더 개수 사용
+            if total_ego_images > 0:
+                remaining_count = total_ego_images
+    else:
+        # 구글시트 클라이언트가 없으면 ego_images 폴더 개수 사용
+        if total_ego_images > 0:
+            remaining_count = total_ego_images
+            print(f"[INFO] 구글시트 클라이언트가 없습니다. ego_images 폴더 개수 사용: {remaining_count}")
+        else:
+            print(f"[WARN] 구글시트 클라이언트도 없고 ego_images 폴더도 찾을 수 없습니다.")
+    
+    # 최종 검증: remaining_count가 비정상적으로 크면 0으로 설정
+    if remaining_count > 100000:
+        print(f"[WARN] 남은 이미지 개수가 비정상적으로 큽니다: {remaining_count}, ego_images 폴더 개수로 재계산합니다.")
+        if total_ego_images > 0:
+            remaining_count = total_ego_images
+        else:
+            remaining_count = 0
+    
     return jsonify({
         'image_id': image_id,
         'image_data': f'data:image/jpeg;base64,{img_base64}',
@@ -550,6 +638,7 @@ def get_image(index):
         'view_type': view_type,  # 이미지가 있는 폴더에 따라 결정된 view 타입
         'current_index': index,
         'total_images': len(annotator.image_ids),
+        'remaining_images': remaining_count,  # 남은 이미지 개수
         'index_changed': index_changed,  # 인덱스가 변경되었는지 여부
         'original_index': original_index  # 원래 요청한 인덱스
     })
