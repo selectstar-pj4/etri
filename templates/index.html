@@ -1678,6 +1678,10 @@
                         if (reviewStatusData[currentImageData.image_id]) {
                             reviewStatusData[currentImageData.image_id].revision_status = '수정완료';
                         }
+                        // 수정요청 드롭박스에서 해당 항목 제거
+                        const imageId = currentImageData.image_id;
+                        failedImages = failedImages.filter(img => img.image_id != imageId);
+                        updateRevisionDropdown();
                         // UI 다시 업데이트 - 검수자 확인 중 메시지 표시
                         const alertDiv = document.getElementById('reviewStatusAlert');
                         console.log('[DEBUG] alertDiv:', alertDiv);
@@ -1876,10 +1880,14 @@
                         note: img.note || '',
                         revision_status: img.revision_status
                     };
-                    failedImages.push({
-                        image_id: img.image_id,
-                        note: img.note || ''
-                    });
+                    // 수정완료가 아닌 불통 이미지만 수정요청 드롭박스에 추가
+                    const revisionStatus = img.revision_status || '';
+                    if (revisionStatus !== '수정완료' && revisionStatus !== '수정 완료') {
+                        failedImages.push({
+                            image_id: img.image_id,
+                            note: img.note || ''
+                        });
+                    }
                 });
                 
                 // 납품 완료 이미지
