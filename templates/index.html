@@ -822,7 +822,9 @@
                 }
             }
             
-            fetch(`/api/image/${index}`)
+            const workerId = document.getElementById('workerId').value.trim() || '';
+            const url = workerId ? `/api/image/${index}?worker_id=${encodeURIComponent(workerId)}` : `/api/image/${index}`;
+            fetch(url)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -840,8 +842,15 @@
                     
                     // Image data received
                     
+                    // 납품완료된 이미지를 건너뛴 경우 인덱스가 변경되었을 수 있음
+                    if (data.index_changed && data.current_index !== undefined) {
+                        currentIndex = data.current_index;
+                        console.log(`[INFO] 납품완료된 이미지를 건너뛰고 인덱스 ${data.original_index}에서 ${data.current_index}로 이동했습니다.`);
+                    } else {
+                        currentIndex = index;
+                    }
+                    
                     currentImageData = data;
-                    currentIndex = index;
                     
                     // 이미지 로드 후 localStorage에서 한글 내용 다시 확인 (image_id가 변경되었을 수 있음)
                     const newImageId = data.image_id;
@@ -1723,9 +1732,34 @@
         }
 
         function updateStatus() {
+            // 남은 이미지와 불통 이미지 개수 계산
+            let remainingCount = 0;
+            let failedCount = 0;
+            
+            if (currentImageData && currentImageData.total_images) {
+                const totalImages = currentImageData.total_images;
+                let passedCount = 0;
+                let completedCount = 0;
+                
+                // reviewStatusData에서 통과와 납품완료 개수 계산
+                for (const imageId in reviewStatusData) {
+                    const status = reviewStatusData[imageId].status;
+                    if (status === '통과') {
+                        passedCount++;
+                    } else if (status === '납품 완료') {
+                        completedCount++;
+                    } else if (status === '불통') {
+                        failedCount++;
+                    }
+                }
+                
+                // 남은 이미지 = 전체 - 통과 - 납품완료
+                remainingCount = totalImages - passedCount - completedCount;
+            }
+            
             document.getElementById('status').textContent = 
-                `Current: ${currentIndex + 1} | Selected bboxes: ` +
-                `${selectedBboxes.length}`;
+                `Current: ${currentIndex + 1} | Selected bboxes: ${selectedBboxes.length} | ` +
+                `남은 이미지: ${remainingCount} | 불통 이미지: ${failedCount}`;
         }
 
         // === 스크롤로 포커스 이동 ===
@@ -1993,7 +2027,9 @@
                 return;
             }
             
-            fetch(`/api/find/${imageIdNum}`)
+            const workerId = document.getElementById('workerId').value.trim() || '';
+            const url = workerId ? `/api/find/${imageIdNum}?worker_id=${encodeURIComponent(workerId)}` : `/api/find/${imageIdNum}`;
+            fetch(url)
             .then(r => {
                 if (!r.ok) {
                     throw new Error(`HTTP error! status: ${r.status}`);
@@ -2007,6 +2043,10 @@
                     return;
                 }
                 if (d.index !== undefined) {
+                    // 납품완료된 이미지를 건너뛴 경우 알림
+                    if (d.index_changed) {
+                        console.log(`[INFO] Image ID ${imageIdNum}는 납품완료 상태여서 인덱스 ${d.original_index}에서 ${d.index}로 이동했습니다.`);
+                    }
                     loadImage(d.index);
                     // 드롭다운 선택 초기화
                     dropdown.value = '';
@@ -2094,7 +2134,9 @@
                 alert('숫자 ID를 입력해주세요.');
                 return;
             }
-            fetch(`/api/find/${v}`)
+            const workerId = document.getElementById('workerId').value.trim() || '';
+            const url = workerId ? `/api/find/${v}?worker_id=${encodeURIComponent(workerId)}` : `/api/find/${v}`;
+            fetch(url)
             .then(r => {
                 if (!r.ok) {
                     throw new Error(`HTTP error! status: ${r.status}`);
@@ -2108,6 +2150,10 @@
                     return;
                 }
                 if (d.index !== undefined) {
+                    // 납품완료된 이미지를 건너뛴 경우 알림
+                    if (d.index_changed) {
+                        console.log(`[INFO] Image ID ${v}는 납품완료 상태여서 인덱스 ${d.original_index}에서 ${d.index}로 이동했습니다.`);
+                    }
                     loadImage(d.index);
                 } else {
                 alert(d.error || '해당 ID를 찾지 못했습니다.');

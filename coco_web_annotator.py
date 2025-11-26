@@ -308,7 +308,50 @@ def find_by_image_id(image_id):
         return jsonify({'error': 'Annotator not initialized'}), 500
     try:
         idx = annotator.image_ids.index(image_id)
-        return jsonify({'index': idx, 'total': len(annotator.image_ids)})
+        
+        # 납품완료된 이미지 필터링: 납품완료 상태인 이미지는 다음 이미지로 이동
+        worker_id = request.args.get('worker_id') or WORKER_ID
+        original_idx = idx
+        max_iterations = len(annotator.image_ids)  # 무한 루프 방지
+        
+        while idx < len(annotator.image_ids) and max_iterations > 0:
+            current_image_id = annotator.image_ids[idx]
+            
+            # 납품완료 상태 확인
+            if google_sheets_client and worker_id:
+                try:
+                    sheet_data = read_from_google_sheets(worker_id)
+                    is_completed = False
+                    for row in sheet_data:
+                        row_image_id = row.get('Image ID', '') or row.get('image_id', '')
+                        if str(row_image_id) == str(current_image_id):
+                            review_status = row.get('검수', '') or row.get('검수 상태', '')
+                            if review_status == '납품 완료':
+                                is_completed = True
+                            break
+                    
+                    if is_completed:
+                        # 납품완료된 이미지면 다음 이미지로 이동
+                        idx += 1
+                        max_iterations -= 1
+                        continue
+                except Exception as e:
+                    print(f"[WARN] 납품완료 상태 확인 중 오류 (계속 진행): {e}")
+            
+            # 납품완료가 아닌 이미지를 찾았으면 루프 종료
+            break
+        
+        # 모든 이미지가 납품완료인 경우
+        if idx >= len(annotator.image_ids):
+            return jsonify({'error': '모든 이미지가 납품 완료 상태입니다.'}), 404
+        
+        index_changed = (idx != original_idx)
+        return jsonify({
+            'index': idx, 
+            'total': len(annotator.image_ids),
+            'index_changed': index_changed,
+            'original_index': original_idx
+        })
     except ValueError:
         return jsonify({'error': f'Image ID {image_id} not found'}), 404
 
@@ -355,6 +398,45 @@ def get_image(index):
     """Get image information for a specific index."""
     if index >= len(annotator.image_ids):
         return jsonify({'error': 'Invalid index'}), 400
+    
+    # 납품완료된 이미지 필터링: 납품완료 상태인 이미지는 건너뛰기
+    worker_id = request.args.get('worker_id') or WORKER_ID
+    original_index = index
+    max_iterations = len(annotator.image_ids)  # 무한 루프 방지
+    
+    while index < len(annotator.image_ids) and max_iterations > 0:
+        image_id = annotator.image_ids[index]
+        
+        # 납품완료 상태 확인
+        if google_sheets_client and worker_id:
+            try:
+                sheet_data = read_from_google_sheets(worker_id)
+                is_completed = False
+                for row in sheet_data:
+                    row_image_id = row.get('Image ID', '') or row.get('image_id', '')
+                    if str(row_image_id) == str(image_id):
+                        review_status = row.get('검수', '') or row.get('검수 상태', '')
+                        if review_status == '납품 완료':
+                            is_completed = True
+                        break
+                
+                if is_completed:
+                    # 납품완료된 이미지면 다음 이미지로 이동
+                    index += 1
+                    max_iterations -= 1
+                    continue
+            except Exception as e:
+                print(f"[WARN] 납품완료 상태 확인 중 오류 (계속 진행): {e}")
+        
+        # 납품완료가 아닌 이미지를 찾았으면 루프 종료
+        break
+    
+    # 모든 이미지가 납품완료인 경우
+    if index >= len(annotator.image_ids):
+        return jsonify({'error': '모든 이미지가 납품완료 상태입니다.'}), 400
+    
+    # 인덱스가 변경되었으면 클라이언트에 알림
+    index_changed = (index != original_index)
         
     image_id = annotator.image_ids[index]
     image_info = annotator.coco.imgs[image_id]
@@ -467,7 +549,9 @@ def get_image(index):
         'existing_annotation': existing_annotation,
         'view_type': view_type,  # 이미지가 있는 폴더에 따라 결정된 view 타입
         'current_index': index,
-        'total_images': len(annotator.image_ids)
+        'total_images': len(annotator.image_ids),
+        'index_changed': index_changed,  # 인덱스가 변경되었는지 여부
+        'original_index': original_index  # 원래 요청한 인덱스
     })
 
 @app.route('/api/translate/question', methods=['POST'])
