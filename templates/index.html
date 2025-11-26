@@ -1003,9 +1003,46 @@
                     updateStatus();
                     drawBboxes();
                     
-                    // 검수 상태 UI 업데이트
+                    // 검수 상태 UI 업데이트 - 이미지 로드 시마다 서버에서 최신 상태 가져오기
                     if (currentImageData && currentImageData.image_id) {
-                        updateReviewStatusUI(currentImageData.image_id);
+                        // 서버에서 해당 이미지의 최신 검수 상태 가져오기
+                        const workerId = document.getElementById('workerId').value.trim() || '';
+                        const imageId = currentImageData.image_id;
+                        
+                        if (workerId) {
+                            fetch(`/api/get_review_status/${imageId}?worker_id=${workerId}`)
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        // reviewStatusData 업데이트
+                                        const reviewStatus = data.review_status || '';
+                                        if (reviewStatus === '통과' || reviewStatus === '불통' || reviewStatus === '납품 완료') {
+                                            reviewStatusData[imageId] = {
+                                                status: reviewStatus,
+                                                note: data.note || '',
+                                                revision_status: data.revision_status || ''
+                                            };
+                                        } else {
+                                            // 검수 상태가 없으면 reviewStatusData에서 제거
+                                            delete reviewStatusData[imageId];
+                                        }
+                                    } else {
+                                        // 검수 상태를 찾지 못한 경우 reviewStatusData에서 제거
+                                        delete reviewStatusData[imageId];
+                                    }
+                                    
+                                    // UI 업데이트
+                                    updateReviewStatusUI(imageId);
+                                })
+                                .catch(error => {
+                                    console.error('Error fetching review status:', error);
+                                    // 에러가 발생해도 기존 데이터로 UI 업데이트
+                                    updateReviewStatusUI(imageId);
+                                });
+                        } else {
+                            // 작업자 ID가 없으면 기존 데이터로만 UI 업데이트
+                            updateReviewStatusUI(imageId);
+                        }
                     }
                 })
                 .catch(error => {
@@ -1857,9 +1894,46 @@
                 // 수정요청 드롭다운 업데이트
                 updateRevisionDropdown();
                 
-                // 현재 이미지의 검수 상태 업데이트
-                if (currentImageData) {
-                    updateReviewStatusUI(currentImageData.image_id);
+                // 현재 이미지의 검수 상태 업데이트 - 서버에서 최신 상태 다시 가져오기
+                if (currentImageData && currentImageData.image_id) {
+                    const workerId = document.getElementById('workerId').value.trim() || '';
+                    const imageId = currentImageData.image_id;
+                    
+                    if (workerId) {
+                        // 서버에서 해당 이미지의 최신 검수 상태 가져오기
+                        fetch(`/api/get_review_status/${imageId}?worker_id=${workerId}`)
+                            .then(response => response.json())
+                            .then(statusData => {
+                                if (statusData.success) {
+                                    // reviewStatusData 업데이트
+                                    const reviewStatus = statusData.review_status || '';
+                                    if (reviewStatus === '통과' || reviewStatus === '불통' || reviewStatus === '납품 완료') {
+                                        reviewStatusData[imageId] = {
+                                            status: reviewStatus,
+                                            note: statusData.note || '',
+                                            revision_status: statusData.revision_status || ''
+                                        };
+                                    } else {
+                                        // 검수 상태가 없으면 reviewStatusData에서 제거
+                                        delete reviewStatusData[imageId];
+                                    }
+                                } else {
+                                    // 검수 상태를 찾지 못한 경우 reviewStatusData에서 제거
+                                    delete reviewStatusData[imageId];
+                                }
+                                
+                                // UI 업데이트
+                                updateReviewStatusUI(imageId);
+                            })
+                            .catch(error => {
+                                console.error('Error fetching review status:', error);
+                                // 에러가 발생해도 기존 데이터로 UI 업데이트
+                                updateReviewStatusUI(imageId);
+                            });
+                    } else {
+                        // 작업자 ID가 없으면 기존 데이터로만 UI 업데이트
+                        updateReviewStatusUI(imageId);
+                    }
                 }
                 
                 // 알럿창 제거 - 콘솔에만 출력

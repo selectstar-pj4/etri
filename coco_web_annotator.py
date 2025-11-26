@@ -2790,6 +2790,48 @@ def sync_from_sheets():
         return jsonify({'error': f'동기화 실패: {str(e)}'}), 500
 
 
+@app.route('/api/get_review_status/<int:image_id>', methods=['GET'])
+def get_review_status(image_id):
+    """
+    특정 이미지의 검수 상태만 가져오기
+    """
+    try:
+        worker_id = request.args.get('worker_id') or WORKER_ID
+        if not worker_id:
+            return jsonify({'error': '작업자 ID가 필요합니다.'}), 400
+        
+        # 구글 시트에서 데이터 읽기
+        sheet_data = read_from_google_sheets(worker_id)
+        
+        # 해당 image_id 찾기
+        for row in sheet_data:
+            row_image_id = row.get('Image ID', '') or row.get('image_id', '')
+            if str(row_image_id) == str(image_id):
+                review_status = row.get('검수', '') or row.get('검수 상태', '')
+                note = row.get('비고', '') or row.get('검수 의견', '')
+                revision_status = row.get('수정여부', '') or row.get('수정 여부', '')
+                
+                return jsonify({
+                    'success': True,
+                    'image_id': image_id,
+                    'review_status': review_status,
+                    'note': note,
+                    'revision_status': revision_status
+                })
+        
+        # 찾지 못한 경우
+        return jsonify({
+            'success': False,
+            'message': 'Image ID not found in sheet.'
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] 검수 상태 조회 중 오류: {e}")
+        import traceback
+        print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
+        return jsonify({'error': f'검수 상태 조회 실패: {str(e)}'}), 500
+
+
 @app.route('/api/remove_duplicates', methods=['POST'])
 def remove_duplicates():
     """중복 어노테이션 제거 API"""
