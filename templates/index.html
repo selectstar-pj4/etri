@@ -583,7 +583,7 @@
                 <input id="searchId" type="number" placeholder="ex 184613" style="width: 100px; padding: 8px 12px; font-size: 0.85rem; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;">
                 <button onclick="jumpToId()" style="flex-shrink: 0; padding: 8px 16px; font-size: 0.85rem; background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%); color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">Go</button>
                 
-                <button onclick="syncFromSheets()" id="syncBtn" style="flex-shrink: 0; padding: 8px 14px; font-size: 0.85rem; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">API 동기화</button>
+                <button onclick="syncFromSheets(true)" id="syncBtn" style="flex-shrink: 0; padding: 8px 14px; font-size: 0.85rem; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease; font-weight: 500;">API 동기화</button>
                 
                 <div id="revisionDropdownContainer" style="display: none;">
                     <label for="revisionDropdown" style="margin: 0; margin-right: 4px; font-size: 0.85rem; font-weight: bold; white-space: nowrap;">수정요청:</label>
@@ -744,7 +744,14 @@
     <script>
         let currentIndex = 0;
         let currentImageData = null;
+        let totalEgoImages = 0; // ego_images 폴더의 전체 이미지 개수 (서버에서 받은 값)
         let selectedBboxes = [];
+        
+        // 필터링 모드 관련 변수
+        let filterMode = false; // 필터링 모드 활성화 여부
+        let filterType = null; // 'passed', 'failed', 'pending'
+        let filteredImageIds = []; // 필터링된 이미지 ID 목록
+        let filteredIndexMap = {}; // image_id -> filteredIndex 매핑
         let bboxElements = [];
         let isDrawMode = false;
         let isDrawing = false;
@@ -851,6 +858,25 @@
                     }
                     
                     currentImageData = data;
+                    
+                    // 필터링 모드인 경우 필터링된 인덱스 업데이트
+                    if (filterMode && data.image_id) {
+                        const imageId = data.image_id;
+                        if (filteredIndexMap[imageId] !== undefined) {
+                            currentIndex = filteredIndexMap[imageId];
+                        }
+                    }
+                    
+                    // 서버에서 받은 total_images 값 저장 (ego_images 폴더 개수)
+                    if (data.total_images !== undefined) {
+                        const serverTotalImages = parseInt(data.total_images, 10);
+                        if (!isNaN(serverTotalImages) && serverTotalImages > 0 && serverTotalImages < 100000) {
+                            totalEgoImages = serverTotalImages;
+                            console.log(`[DEBUG] total_images 업데이트: ${totalEgoImages}`);
+                        } else if (serverTotalImages >= 100000) {
+                            console.warn(`[WARN] 서버에서 받은 total_images가 비정상적으로 큽니다: ${serverTotalImages}, 이전 값 유지: ${totalEgoImages}`);
+                        }
+                    }
                     
                     // 이미지 로드 후 localStorage에서 한글 내용 다시 확인 (image_id가 변경되었을 수 있음)
                     const newImageId = data.image_id;
@@ -1514,7 +1540,31 @@
         }
 
         function nextImage() {
-            loadImage(currentIndex + 1);
+            if (filterMode && filteredImageIds.length > 0) {
+                // 필터링 모드에서는 필터링된 목록 내에서 이동
+                if (currentIndex < filteredImageIds.length - 1) {
+                    loadImage(currentIndex + 1);
+                } else {
+                    alert('마지막 필터링된 이미지입니다.');
+                }
+            } else {
+                loadImage(currentIndex + 1);
+            }
+        }
+        
+        function prevImage() {
+            if (filterMode && filteredImageIds.length > 0) {
+                // 필터링 모드에서는 필터링된 목록 내에서 이동
+                if (currentIndex > 0) {
+                    loadImage(currentIndex - 1);
+                } else {
+                    alert('첫 번째 필터링된 이미지입니다.');
+                }
+            } else {
+                if (currentIndex > 0) {
+                    loadImage(currentIndex - 1);
+                }
+            }
         }
 
         function saveAnnotation() {
@@ -1738,18 +1788,23 @@
         }
 
         function updateStatus() {
-            // 남은 이미지, 불통 이미지, 검수 대기 개수 계산
-            let remainingCount = 0;
+            // 통과, 납품완료, 불통, 검수 대기 개수 계산
+            let passedCount = 0;
+            let completedCount = 0;
             let failedCount = 0;
             let pendingReviewCount = 0;
             
-            // reviewStatusData에서 불통 이미지와 검수 대기 개수 계산
+            // reviewStatusData에서 상태별 개수 계산
             for (const imageId in reviewStatusData) {
                 const reviewInfo = reviewStatusData[imageId];
                 const status = reviewInfo.status;
                 const revisionStatus = reviewInfo.revision_status || '';
                 
-                if (status === '불통') {
+                if (status === '통과') {
+                    passedCount++;
+                } else if (status === '납품 완료') {
+                    completedCount++;
+                } else if (status === '불통') {
                     // 검수 대기: 불통 상태이고 수정완료된 경우
                     if (revisionStatus === '수정완료' || revisionStatus === '수정 완료') {
                         pendingReviewCount++;
@@ -1760,23 +1815,181 @@
                 }
             }
             
-            // 서버에서 계산된 남은 이미지 개수 사용
+            // 서버에서 계산한 remaining_images 값을 우선 사용
+            let remainingCount = 0;
             if (currentImageData && currentImageData.remaining_images !== undefined) {
-                remainingCount = parseInt(currentImageData.remaining_images, 10);
-                if (isNaN(remainingCount) || remainingCount < 0) {
-                    remainingCount = 0;
+                const serverRemaining = parseInt(currentImageData.remaining_images, 10);
+                if (!isNaN(serverRemaining) && serverRemaining >= 0 && serverRemaining < 100000) {
+                    remainingCount = serverRemaining;
+                    console.log(`[DEBUG] 서버에서 받은 remaining_images 사용: ${remainingCount}`);
+                } else {
+                    console.warn(`[WARN] 서버에서 받은 remaining_images가 유효하지 않습니다: ${serverRemaining}`);
+                    // 서버 값이 유효하지 않으면 클라이언트에서 계산
+                    const totalImages = totalEgoImages || (currentImageData.total_images ? parseInt(currentImageData.total_images, 10) : 0);
+                    if (totalImages > 0 && totalImages < 100000) {
+                        remainingCount = totalImages - (completedCount + passedCount + failedCount + pendingReviewCount);
+                        if (remainingCount < 0) {
+                            remainingCount = 0;
+                        }
+                        console.log(`[DEBUG] 클라이언트에서 계산한 remaining_images: ${remainingCount} (total: ${totalImages}, completed: ${completedCount}, passed: ${passedCount}, failed: ${failedCount}, pending: ${pendingReviewCount})`);
+                    }
                 }
-                // 비정상적으로 큰 값이면 서버 로그 확인 필요 (프론트엔드에서는 그대로 표시)
-                if (remainingCount > 100000) {
-                    console.warn(`[WARN] 남은 이미지 개수가 비정상적으로 큽니다: ${remainingCount}. 서버 로그를 확인하세요.`);
-                    // 서버에서 이미 처리했을 것이므로, 여기서는 0으로 설정하지 않음
-                    // 대신 서버 로그를 확인하도록 안내
+            } else {
+                // 서버에서 remaining_images가 없으면 클라이언트에서 계산
+                const totalImages = totalEgoImages || (currentImageData && currentImageData.total_images ? parseInt(currentImageData.total_images, 10) : 0);
+                if (totalImages > 0 && totalImages < 100000) {
+                    remainingCount = totalImages - (completedCount + passedCount + failedCount + pendingReviewCount);
+                    if (remainingCount < 0) {
+                        remainingCount = 0;
+                    }
+                    console.log(`[DEBUG] 클라이언트에서 계산한 remaining_images: ${remainingCount} (total: ${totalImages}, completed: ${completedCount}, passed: ${passedCount}, failed: ${failedCount}, pending: ${pendingReviewCount})`);
+                } else {
+                    console.warn(`[WARN] total_images가 유효하지 않아 남은 이미지를 계산할 수 없습니다: ${totalImages}`);
                 }
             }
             
-            document.getElementById('status').textContent = 
-                `Current: ${currentIndex + 1} | Selected bboxes: ${selectedBboxes.length} | ` +
-                `남은 이미지: ${remainingCount} | 불통 이미지: ${failedCount} | 검수 대기: ${pendingReviewCount}`;
+            // 상태바 업데이트: 현재, 남은 이미지, 납품완료, 통과, 불통, 검수 대기
+            const statusElement = document.getElementById('status');
+            
+            // 필터링 모드 표시
+            let filterModeText = '';
+            if (filterMode) {
+                const filterTypeNames = {
+                    'passed': '통과',
+                    'failed': '불통',
+                    'pending': '검수 대기'
+                };
+                filterModeText = `[${filterTypeNames[filterType]} 이미지 보기 모드] `;
+            }
+            
+            // 클릭 가능한 링크로 만들기
+            const currentText = filterMode ? 
+                `현재: ${currentIndex + 1} / ${filteredImageIds.length}` : 
+                `현재: ${currentIndex + 1}`;
+            
+            const statusHTML = `${filterModeText}${currentText} | 남은 이미지: ${remainingCount} | 납품완료: ${completedCount} | ` +
+                `통과: <span class="filter-link" data-filter="passed" style="text-decoration: underline; cursor: pointer; color: #2196F3;">${passedCount}</span> | ` +
+                `불통: <span class="filter-link" data-filter="failed" style="text-decoration: underline; cursor: pointer; color: #ff9800;">${failedCount}</span> | ` +
+                `검수 대기: <span class="filter-link" data-filter="pending" style="text-decoration: underline; cursor: pointer; color: #4CAF50;">${pendingReviewCount}</span>`;
+            
+            statusElement.innerHTML = statusHTML;
+            
+            // 필터링 링크에 이벤트 리스너 추가
+            const filterLinks = statusElement.querySelectorAll('.filter-link');
+            filterLinks.forEach(link => {
+                link.addEventListener('click', function() {
+                    const filter = this.getAttribute('data-filter');
+                    applyFilter(filter);
+                });
+            });
+            
+            // 필터링 모드 해제 링크에 이벤트 리스너 추가
+            const clearFilterLink = statusElement.querySelector('.clear-filter-link');
+            if (clearFilterLink) {
+                clearFilterLink.addEventListener('click', function() {
+                    clearFilter();
+                });
+            }
+        }
+        
+        // 필터링 적용 함수
+        function applyFilter(filterType) {
+            console.log(`[DEBUG] 필터링 적용: ${filterType}`);
+            
+            // 필터링된 이미지 ID 목록 생성
+            filteredImageIds = [];
+            filteredIndexMap = {};
+            
+            for (const imageId in reviewStatusData) {
+                const reviewInfo = reviewStatusData[imageId];
+                const status = reviewInfo.status;
+                const revisionStatus = reviewInfo.revision_status || '';
+                
+                let shouldInclude = false;
+                
+                if (filterType === 'passed' && status === '통과') {
+                    shouldInclude = true;
+                } else if (filterType === 'failed' && status === '불통' && 
+                          !(revisionStatus === '수정완료' || revisionStatus === '수정 완료')) {
+                    shouldInclude = true;
+                } else if (filterType === 'pending' && status === '불통' && 
+                          (revisionStatus === '수정완료' || revisionStatus === '수정 완료')) {
+                    shouldInclude = true;
+                }
+                
+                if (shouldInclude) {
+                    filteredIndexMap[imageId] = filteredImageIds.length;
+                    filteredImageIds.push(parseInt(imageId));
+                }
+            }
+            
+            if (filteredImageIds.length === 0) {
+                alert(`해당 상태의 이미지가 없습니다.`);
+                return;
+            }
+            
+            // 필터링 모드 활성화
+            filterMode = true;
+            filterType = filterType;
+            
+            // 현재 이미지가 필터링 목록에 있는지 확인
+            if (currentImageData && currentImageData.image_id) {
+                const currentImageId = currentImageData.image_id;
+                if (filteredIndexMap[currentImageId] !== undefined) {
+                    // 현재 이미지가 필터링 목록에 있으면 그대로 유지
+                    currentIndex = filteredIndexMap[currentImageId];
+                } else {
+                    // 현재 이미지가 필터링 목록에 없으면 첫 번째 이미지로 이동
+                    currentIndex = 0;
+                    // 첫 번째 필터링된 이미지의 실제 인덱스 찾기
+                    const firstImageId = filteredImageIds[0];
+                    findAndLoadImageById(firstImageId);
+                    return;
+                }
+            } else {
+                // 현재 이미지가 없으면 첫 번째 필터링된 이미지로 이동
+                currentIndex = 0;
+                const firstImageId = filteredImageIds[0];
+                findAndLoadImageById(firstImageId);
+                return;
+            }
+            
+            // 상태바 업데이트
+            updateStatus();
+        }
+        
+        // 필터링 모드 해제 함수
+        function clearFilter() {
+            filterMode = false;
+            filterType = null;
+            filteredImageIds = [];
+            filteredIndexMap = {};
+            
+            // 현재 이미지의 실제 인덱스 찾기
+            if (currentImageData && currentImageData.image_id) {
+                findAndLoadImageById(currentImageData.image_id);
+            } else {
+                loadImage(0);
+            }
+        }
+        
+        // Image ID로 이미지 찾기 및 로드
+        function findAndLoadImageById(imageId) {
+            const workerId = document.getElementById('workerId').value.trim() || '';
+            fetch(`/api/find/${imageId}?worker_id=${workerId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error finding image:', data.error);
+                        alert(data.error);
+                        return;
+                    }
+                    loadImage(data.index);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('이미지를 찾을 수 없습니다.');
+                });
         }
 
         // === 스크롤로 포커스 이동 ===
@@ -1887,12 +2100,15 @@
         let reviewStatusData = {}; // image_id -> {status, note, revision_status}
         let failedImages = []; // 수정요청 이미지 목록
         
-        function syncFromSheets() {
+        function syncFromSheets(isManualSync = false) {
             const btn = document.getElementById('syncBtn');
-            const isManualSync = btn !== null; // 수동 동기화인지 자동 동기화인지 확인
+            // isManualSync 파라미터가 명시적으로 전달되지 않으면 버튼 존재 여부로 판단
+            if (!isManualSync && btn) {
+                isManualSync = true; // 버튼이 있고 명시적으로 false가 아니면 수동 동기화로 간주
+            }
             let originalText = '';
             
-            if (btn) {
+            if (btn && isManualSync) {
                 originalText = btn.textContent;
                 btn.textContent = '동기화 중...';
                 btn.disabled = true;
@@ -1901,23 +2117,27 @@
             fetch('/api/sync_from_sheets')
             .then(response => response.json())
             .then(data => {
-                if (btn) {
+                if (btn && isManualSync) {
                     btn.textContent = originalText;
                     btn.disabled = false;
                 }
                 
                 if (data.error) {
-                    alert('동기화 실패: ' + data.error);
+                    if (isManualSync) {
+                        alert('동기화 실패: ' + data.error);
+                    } else {
+                        console.error('자동 동기화 실패:', data.error);
+                    }
                     return;
                 }
                 
-                // 검수 상태 데이터 저장
-                reviewStatusData = {};
-                failedImages = [];
+                // 검수 상태 데이터 저장 (한 번에 업데이트하여 중간에 updateStatus가 호출되지 않도록)
+                const newReviewStatusData = {};
+                const newFailedImages = [];
                 
                 // 통과 이미지
                 data.passed.forEach(img => {
-                    reviewStatusData[img.image_id] = {
+                    newReviewStatusData[img.image_id] = {
                         status: '통과',
                         note: '',
                         revision_status: img.revision_status
@@ -1926,7 +2146,7 @@
                 
                 // 불통 이미지
                 data.failed.forEach(img => {
-                    reviewStatusData[img.image_id] = {
+                    newReviewStatusData[img.image_id] = {
                         status: '불통',
                         note: img.note || '',
                         revision_status: img.revision_status
@@ -1934,7 +2154,7 @@
                     // 수정완료가 아닌 불통 이미지만 수정요청 드롭박스에 추가
                     const revisionStatus = img.revision_status || '';
                     if (revisionStatus !== '수정완료' && revisionStatus !== '수정 완료') {
-                        failedImages.push({
+                        newFailedImages.push({
                             image_id: img.image_id,
                             note: img.note || ''
                         });
@@ -1943,88 +2163,85 @@
                 
                 // 납품 완료 이미지
                 data.completed.forEach(img => {
-                    reviewStatusData[img.image_id] = {
+                    newReviewStatusData[img.image_id] = {
                         status: '납품 완료',
                         note: '',
                         revision_status: img.revision_status
                     };
                 });
                 
-                // 수정요청 드롭다운 업데이트
-                updateRevisionDropdown();
-                
-                // reviewStatusData를 localStorage에 저장 (새로고침 시에도 유지)
-                try {
-                    localStorage.setItem('reviewStatusData', JSON.stringify(reviewStatusData));
-                } catch (e) {
-                    console.warn('reviewStatusData localStorage 저장 실패:', e);
-                }
-                
-                // 상태 표시 업데이트 (남은 이미지, 불통 이미지, 검수 대기 개수)
-                updateStatus();
-                
-                // 현재 이미지의 검수 상태 업데이트 - 서버에서 최신 상태 다시 가져오기
-                if (currentImageData && currentImageData.image_id) {
-                    const workerId = document.getElementById('workerId').value.trim() || '';
-                    const imageId = currentImageData.image_id;
-                    
-                    if (workerId) {
-                        // 서버에서 해당 이미지의 최신 검수 상태 가져오기
-                        fetch(`/api/get_review_status/${imageId}?worker_id=${workerId}`)
-                            .then(response => response.json())
-                            .then(statusData => {
-                                if (statusData.success) {
-                                    // reviewStatusData 업데이트
-                                    const reviewStatus = statusData.review_status || '';
-                                    if (reviewStatus === '통과' || reviewStatus === '불통' || reviewStatus === '납품 완료') {
-                                        reviewStatusData[imageId] = {
-                                            status: reviewStatus,
-                                            note: statusData.note || '',
-                                            revision_status: statusData.revision_status || ''
-                                        };
+                // 현재 이미지의 검수 상태를 서버에서 가져와서 업데이트 (동기화)
+                const updateCurrentImageStatus = () => {
+                    if (currentImageData && currentImageData.image_id) {
+                        const workerId = document.getElementById('workerId').value.trim() || '';
+                        const imageId = currentImageData.image_id;
+                        
+                        if (workerId) {
+                            return fetch(`/api/get_review_status/${imageId}?worker_id=${workerId}`)
+                                .then(response => response.json())
+                                .then(statusData => {
+                                    if (statusData.success) {
+                                        // reviewStatusData 업데이트
+                                        const reviewStatus = statusData.review_status || '';
+                                        if (reviewStatus === '통과' || reviewStatus === '불통' || reviewStatus === '납품 완료') {
+                                            newReviewStatusData[imageId] = {
+                                                status: reviewStatus,
+                                                note: statusData.note || '',
+                                                revision_status: statusData.revision_status || ''
+                                            };
+                                        } else {
+                                            // 검수 상태가 없으면 reviewStatusData에서 제거
+                                            delete newReviewStatusData[imageId];
+                                        }
                                     } else {
-                                        // 검수 상태가 없으면 reviewStatusData에서 제거
-                                        delete reviewStatusData[imageId];
+                                        // 검수 상태를 찾지 못한 경우 reviewStatusData에서 제거
+                                        delete newReviewStatusData[imageId];
                                     }
-                                    
-                                    // localStorage 업데이트
-                                    try {
-                                        localStorage.setItem('reviewStatusData', JSON.stringify(reviewStatusData));
-                                    } catch (e) {
-                                        console.warn('reviewStatusData localStorage 저장 실패:', e);
-                                    }
-                                } else {
-                                    // 검수 상태를 찾지 못한 경우 reviewStatusData에서 제거
-                                    delete reviewStatusData[imageId];
-                                }
-                                
-                                    // UI 업데이트
-                                    updateReviewStatusUI(imageId);
-                                    
-                                    // 상태 표시 업데이트 (남은 이미지, 불통 이미지, 검수 대기 개수)
-                                    updateStatus();
-                            })
-                            .catch(error => {
-                                console.error('Error fetching review status:', error);
-                                // 에러가 발생해도 기존 데이터로 UI 업데이트
-                                updateStatus();
-                                updateReviewStatusUI(imageId);
-                            });
-                    } else {
-                        // 작업자 ID가 없으면 기존 데이터로만 UI 업데이트
-                        updateStatus();
-                        updateReviewStatusUI(imageId);
+                                })
+                                .catch(error => {
+                                    console.error('Error fetching review status:', error);
+                                    // 에러 발생 시 기존 데이터 유지
+                                });
+                        }
                     }
-                } else {
-                    // 현재 이미지가 없어도 상태 표시는 업데이트
-                    updateStatus();
-                }
+                    return Promise.resolve();
+                };
+                
+                // 현재 이미지 상태 업데이트 후 전체 데이터 적용
+                updateCurrentImageStatus().then(() => {
+                    // 모든 데이터가 준비된 후 한 번에 업데이트
+                    reviewStatusData = newReviewStatusData;
+                    failedImages = newFailedImages;
+                    
+                    // 수정요청 드롭다운 업데이트
+                    updateRevisionDropdown();
+                    
+                    // reviewStatusData를 localStorage에 저장 (새로고침 시에도 유지)
+                    try {
+                        localStorage.setItem('reviewStatusData', JSON.stringify(reviewStatusData));
+                    } catch (e) {
+                        console.warn('reviewStatusData localStorage 저장 실패:', e);
+                    }
+                    
+                    // 필터링 모드가 활성화되어 있으면 필터링 목록 재생성
+                    if (filterMode && filterType) {
+                        applyFilter(filterType);
+                    } else {
+                        // 상태 표시 업데이트 (데이터가 모두 준비된 후 한 번만 호출)
+                        updateStatus();
+                    }
+                    
+                    // 현재 이미지의 UI 업데이트
+                    if (currentImageData && currentImageData.image_id) {
+                        updateReviewStatusUI(currentImageData.image_id);
+                    }
+                });
                 
                 // 알럿창 제거 - 콘솔에만 출력
                 console.log(`동기화 완료! 통과: ${data.passed.length}개, 불통: ${data.failed.length}개, 납품 완료: ${data.completed.length}개`);
             })
             .catch(error => {
-                if (btn) {
+                if (btn && isManualSync) {
                     btn.textContent = originalText;
                     btn.disabled = false;
                 }
@@ -2176,6 +2393,21 @@
                 alert('숫자 ID를 입력해주세요.');
                 return;
             }
+            
+            // 필터링 모드인 경우 필터링된 목록에 있는지 확인
+            if (filterMode && filteredImageIds.length > 0) {
+                if (!filteredImageIds.includes(v)) {
+                    alert('해당 이미지는 현재 필터링된 목록에 없습니다.');
+                    return;
+                }
+                // 필터링된 목록에서 인덱스 찾기
+                const filteredIdx = filteredIndexMap[v];
+                if (filteredIdx !== undefined) {
+                    findAndLoadImageById(v);
+                    return;
+                }
+            }
+            
             const workerId = document.getElementById('workerId').value.trim() || '';
             const url = workerId ? `/api/find/${v}?worker_id=${encodeURIComponent(workerId)}` : `/api/find/${v}`;
             fetch(url)
@@ -2924,11 +3156,14 @@
                 loadReviewStatusDataFromStorage(); // localStorage에서 reviewStatusData 복원
                 loadImage(0);
                 
-                // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 20분(1200000ms)마다 실행
-                syncFromSheets(); // 즉시 한 번 실행
-                setInterval(function() {
-                    syncFromSheets();
-                }, 20 * 60 * 1000); // 20분 = 1200000ms
+            // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 20분(1200000ms)마다 실행
+            // 작업자 ID 로드 후 약간의 지연을 두고 동기화 (구글시트 클라이언트 초기화 시간 확보)
+            setTimeout(function() {
+                syncFromSheets(false); // 자동 동기화 (알림창 없음)
+            }, 500); // 0.5초 후 실행
+            setInterval(function() {
+                syncFromSheets(false); // 자동 동기화
+            }, 20 * 60 * 1000); // 20분 = 1200000ms
             });
         } else {
             loadWorkerId();
@@ -2936,11 +3171,15 @@
             loadImage(0);
             
             // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 20분(1200000ms)마다 실행
-            syncFromSheets(); // 즉시 한 번 실행
+            // 작업자 ID 로드 후 약간의 지연을 두고 동기화 (구글시트 클라이언트 초기화 시간 확보)
+            setTimeout(function() {
+                syncFromSheets(false); // 자동 동기화 (알림창 없음)
+            }, 500); // 0.5초 후 실행
             setInterval(function() {
-                syncFromSheets();
+                syncFromSheets(false); // 자동 동기화
             }, 20 * 60 * 1000); // 20분 = 1200000ms
         }
     </script>
 </body>
+</html>
 </html>

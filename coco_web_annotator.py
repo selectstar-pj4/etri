@@ -326,8 +326,10 @@ def find_by_image_id(image_id):
                         row_image_id = row.get('Image ID', '') or row.get('image_id', '')
                         if str(row_image_id) == str(current_image_id):
                             review_status = row.get('검수', '') or row.get('검수 상태', '')
-                            if review_status == '납품 완료':
+                            # '납품 완료' 또는 '납품완료' (공백 유무 무관)
+                            if review_status and ('납품 완료' in review_status or '납품완료' in review_status):
                                 is_completed = True
+                                print(f"[DEBUG] Image ID {current_image_id}는 납품완료 상태입니다. 다음 이미지로 이동합니다.")
                             break
                     
                     if is_completed:
@@ -416,8 +418,10 @@ def get_image(index):
                     row_image_id = row.get('Image ID', '') or row.get('image_id', '')
                     if str(row_image_id) == str(image_id):
                         review_status = row.get('검수', '') or row.get('검수 상태', '')
-                        if review_status == '납품 완료':
+                        # '납품 완료' 또는 '납품완료' (공백 유무 무관)
+                        if review_status and ('납품 완료' in review_status or '납품완료' in review_status):
                             is_completed = True
+                            print(f"[DEBUG] Image ID {image_id}는 납품완료 상태입니다. 다음 이미지로 이동합니다.")
                         break
                 
                 if is_completed:
@@ -637,7 +641,7 @@ def get_image(index):
         'existing_annotation': existing_annotation,
         'view_type': view_type,  # 이미지가 있는 폴더에 따라 결정된 view 타입
         'current_index': index,
-        'total_images': len(annotator.image_ids),
+        'total_images': total_ego_images,  # ego_images 폴더의 전체 이미지 개수
         'remaining_images': remaining_count,  # 남은 이미지 개수
         'index_changed': index_changed,  # 인덱스가 변경되었는지 여부
         'original_index': original_index  # 원래 요청한 인덱스
