@@ -653,12 +653,12 @@
                     </div>
                 </div>
                 
-                <!-- 빨간색 칸: Rationale 한글 입력 (비활성화) -->
-                <div class="form-group" style="margin-bottom: 8px; opacity: 0.5;">
-                    <label for="rationaleKo" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale (한글): <span style="color: #999; font-size: 0.7rem;">(당분간 사용 안 함)</span></label>
-                    <textarea id="rationaleKo" rows="8" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="당분간 사용하지 않습니다" disabled></textarea>
+                <!-- 빨간색 칸: Rationale 한글 입력 -->
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="rationaleKo" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale (한글):</label>
+                    <textarea id="rationaleKo" rows="8" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;" placeholder="한글 근거를 입력하세요"></textarea>
                     <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px;">
-                        <button type="button" onclick="translateRationale()" style="padding: 6px 12px; font-size: 0.7rem; white-space: nowrap; opacity: 0.5; cursor: not-allowed; background: linear-gradient(135deg, #9e9e9e 0%, #757575 100%); color: white; border: none; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" disabled>번역</button>
+                        <button type="button" onclick="translateRationale()" style="padding: 6px 12px; font-size: 0.7rem; white-space: nowrap; background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%); color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.3s ease;">번역</button>
                         <button type="button" onclick="reviewTranslation()" style="padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; display: none;">검수</button>
                     </div>
                     <div id="reviewResultContainer" style="display: none; margin-top: 8px;">
@@ -702,9 +702,9 @@
                     <textarea id="response" rows="1" style="padding: 10px 12px; font-size: 0.8rem; min-height: 28px; height: 28px; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;"></textarea>
                 </div>
                 
-                <div class="form-group" style="margin-bottom: 8px; opacity: 0.5;">
-                    <label for="rationale" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale: <span style="color: #999; font-size: 0.7rem;">(당분간 사용 안 함)</span></label>
-                    <textarea id="rationale" rows="5" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); cursor: not-allowed; border: 2px solid #e0e0e0; border-radius: 8px;" disabled></textarea>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label for="rationale" style="font-size: 0.8rem; margin-bottom: 2px;">Rationale:</label>
+                    <textarea id="rationale" rows="5" style="width: 100%; padding: 10px 12px; font-size: 0.8rem; line-height: 1.4; border: 2px solid #e0e0e0; border-radius: 8px; transition: all 0.3s ease;" placeholder="영문 근거를 입력하세요"></textarea>
                 </div>
                 
                 <div class="form-group" style="margin-bottom: 8px;">
@@ -1543,7 +1543,13 @@
             if (filterMode && filteredImageIds.length > 0) {
                 // 필터링 모드에서는 필터링된 목록 내에서 이동
                 if (currentIndex < filteredImageIds.length - 1) {
-                    loadImage(currentIndex + 1);
+                    const nextIndex = currentIndex + 1;
+                    const nextImageId = filteredImageIds[nextIndex];
+                    if (nextImageId) {
+                        findAndLoadImageById(nextImageId);
+                    } else {
+                        alert('다음 이미지를 찾을 수 없습니다.');
+                    }
                 } else {
                     alert('마지막 필터링된 이미지입니다.');
                 }
@@ -1556,7 +1562,13 @@
             if (filterMode && filteredImageIds.length > 0) {
                 // 필터링 모드에서는 필터링된 목록 내에서 이동
                 if (currentIndex > 0) {
-                    loadImage(currentIndex - 1);
+                    const prevIndex = currentIndex - 1;
+                    const prevImageId = filteredImageIds[prevIndex];
+                    if (prevImageId) {
+                        findAndLoadImageById(prevImageId);
+                    } else {
+                        alert('이전 이미지를 찾을 수 없습니다.');
+                    }
                 } else {
                     alert('첫 번째 필터링된 이미지입니다.');
                 }
@@ -1607,6 +1619,7 @@
             const missingFields = [];
             if (!question) missingFields.push('question');
             if (!response) missingFields.push('response');
+            if (!rationale) missingFields.push('rationale');
             // 객관선지 필수 검증 제거
             if (!selectedView) missingFields.push('view');
             if (selectedBboxes.length === 0) missingFields.push('bbox');
@@ -1616,6 +1629,97 @@
                 alert(`다음 필드를 입력해주세요: ` +
                       `${missingFields.join(', ')}`);
                 return;
+            }
+            
+            // Rationale 내용 검증: (a), (b), (c), (d) 및 (ATT), (POS), (REL) 같은 패턴 체크
+            const rationalePatterns = [
+                /\([abcd]\)/gi,  // (a), (b), (c), (d)
+                /\(ATT\)/gi,     // (ATT)
+                /\(POS\)/gi,     // (POS)
+                /\(REL\)/gi      // (REL)
+            ];
+            
+            let foundPatterns = [];
+            for (let pattern of rationalePatterns) {
+                if (pattern.test(rationale)) {
+                    if (pattern.source.includes('[abcd]')) {
+                        foundPatterns.push('(a), (b), (c), (d) 같은 객관식 선지 표기');
+                    } else if (pattern.source.includes('ATT')) {
+                        foundPatterns.push('(ATT)');
+                    } else if (pattern.source.includes('POS')) {
+                        foundPatterns.push('(POS)');
+                    } else if (pattern.source.includes('REL')) {
+                        foundPatterns.push('(REL)');
+                    }
+                }
+            }
+            
+            if (foundPatterns.length > 0) {
+                const confirmMsg = `Rationale에 다음 내용이 포함되어 있습니다:\n${foundPatterns.join(', ')}\n\n이 내용은 자동으로 제거됩니다. 계속하시겠습니까?`;
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+                
+                // 확인 후 클라이언트에서도 미리 정리 (사용자가 확인할 수 있도록)
+                let cleanedRationale = rationale;
+                // (a), (b), (c), (d) 패턴 제거
+                cleanedRationale = cleanedRationale.replace(/\([abcd]\)/gi, '');
+                // (ATT), (POS), (REL) 패턴 제거
+                cleanedRationale = cleanedRationale.replace(/\(ATT\)/gi, '');
+                cleanedRationale = cleanedRationale.replace(/\(POS\)/gi, '');
+                cleanedRationale = cleanedRationale.replace(/\(REL\)/gi, '');
+                // 연속된 공백 정리
+                cleanedRationale = cleanedRationale.replace(/\s+/g, ' ').trim();
+                
+                // 정리된 rationale을 필드에 반영
+                document.getElementById('rationale').value = cleanedRationale;
+                rationale = cleanedRationale;
+            }
+            
+            // Rationale에 객관식 선지 단어가 포함되어 있는지 검증
+            // question에서 <choice> 태그 파싱 또는 직접 입력된 선지 사용
+            let choiceWords = [];
+            let allChoices = [];
+            
+            // question에서 <choice> 태그 파싱 시도
+            const choiceMatch = question.match(/<choice>(.*?)<\/choice>/i);
+            if (choiceMatch) {
+                const choiceContent = choiceMatch[1];
+                // 각 선지 추출: (a) text, (b) text 형식
+                const choicePattern = /\(([abcd])\)\s*([^,)]+)/gi;
+                let match;
+                const choices = {};
+                while ((match = choicePattern.exec(choiceContent)) !== null) {
+                    const letter = match[1].toLowerCase();
+                    const text = match[2].trim();
+                    choices[letter] = text;
+                    allChoices.push(text);
+                }
+                
+                // 각 선지의 단어 추출 (2글자 이상인 단어만)
+                Object.values(choices).forEach(choice => {
+                    const words = choice.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                    choiceWords.push(...words);
+                });
+            } else {
+                // <choice> 태그가 없으면 직접 입력된 선지 사용
+                allChoices = [choiceA, choiceB, choiceC, choiceD].filter(c => c && c.trim());
+                allChoices.forEach(choice => {
+                    const words = choice.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                    choiceWords.push(...words);
+                });
+            }
+            
+            // 선지가 있고 rationale이 있으면 검증
+            if (choiceWords.length > 0 && rationale) {
+                const rationaleLower = rationale.toLowerCase();
+                const foundWords = choiceWords.filter(word => rationaleLower.includes(word));
+                
+                if (foundWords.length === 0) {
+                    const choicesText = allChoices.length > 0 ? allChoices.join(', ') : '선지';
+                    alert(`Rationale에 객관식 선지의 단어가 포함되어야 합니다.\n\n선지: ${choicesText}\n\nRationale에 선지의 단어를 포함해주세요.`);
+                    return;
+                }
             }
             
             // bbox 검증: 2개 이상일 경우 1개만 선택되도록 확인
@@ -1958,6 +2062,46 @@
             updateStatus();
         }
         
+        // 데이터 변경 감지 함수
+        function hasDataChanged(oldData, newData, oldFailed, newFailed) {
+            // 키 개수 비교
+            const oldKeys = Object.keys(oldData).sort();
+            const newKeys = Object.keys(newData).sort();
+            
+            if (oldKeys.length !== newKeys.length) {
+                return true;
+            }
+            
+            // 각 키의 값 비교
+            for (const key of oldKeys) {
+                if (!newData[key]) {
+                    return true;
+                }
+                const oldItem = oldData[key];
+                const newItem = newData[key];
+                
+                if (oldItem.status !== newItem.status ||
+                    oldItem.note !== newItem.note ||
+                    oldItem.revision_status !== newItem.revision_status) {
+                    return true;
+                }
+            }
+            
+            // failedImages 비교
+            if (oldFailed.length !== newFailed.length) {
+                return true;
+            }
+            
+            const oldFailedIds = oldFailed.map(img => img.image_id).sort();
+            const newFailedIds = newFailed.map(img => img.image_id).sort();
+            
+            if (JSON.stringify(oldFailedIds) !== JSON.stringify(newFailedIds)) {
+                return true;
+            }
+            
+            return false;
+        }
+        
         // 필터링 모드 해제 함수
         function clearFilter() {
             filterMode = false;
@@ -1983,6 +2127,10 @@
                         console.error('Error finding image:', data.error);
                         alert(data.error);
                         return;
+                    }
+                    // 필터링 모드인 경우 필터링된 인덱스로 업데이트
+                    if (filterMode && filteredIndexMap[imageId] !== undefined) {
+                        currentIndex = filteredIndexMap[imageId];
                     }
                     loadImage(data.index);
                 })
@@ -2209,29 +2357,38 @@
                 
                 // 현재 이미지 상태 업데이트 후 전체 데이터 적용
                 updateCurrentImageStatus().then(() => {
-                    // 모든 데이터가 준비된 후 한 번에 업데이트
-                    reviewStatusData = newReviewStatusData;
-                    failedImages = newFailedImages;
+                    // 데이터 변경 감지: 실제로 변경된 경우에만 업데이트
+                    const dataChanged = hasDataChanged(reviewStatusData, newReviewStatusData, failedImages, newFailedImages);
                     
-                    // 수정요청 드롭다운 업데이트
-                    updateRevisionDropdown();
-                    
-                    // reviewStatusData를 localStorage에 저장 (새로고침 시에도 유지)
-                    try {
-                        localStorage.setItem('reviewStatusData', JSON.stringify(reviewStatusData));
-                    } catch (e) {
-                        console.warn('reviewStatusData localStorage 저장 실패:', e);
-                    }
-                    
-                    // 필터링 모드가 활성화되어 있으면 필터링 목록 재생성
-                    if (filterMode && filterType) {
-                        applyFilter(filterType);
+                    if (dataChanged) {
+                        console.log('[INFO] 구글시트 데이터 변경 감지 - 업데이트 수행');
+                        // 모든 데이터가 준비된 후 한 번에 업데이트
+                        reviewStatusData = newReviewStatusData;
+                        failedImages = newFailedImages;
+                        
+                        // 수정요청 드롭다운 업데이트
+                        updateRevisionDropdown();
+                        
+                        // reviewStatusData를 localStorage에 저장 (새로고침 시에도 유지)
+                        try {
+                            localStorage.setItem('reviewStatusData', JSON.stringify(reviewStatusData));
+                        } catch (e) {
+                            console.warn('reviewStatusData localStorage 저장 실패:', e);
+                        }
+                        
+                        // 필터링 모드가 활성화되어 있으면 필터링 목록 재생성
+                        if (filterMode && filterType) {
+                            applyFilter(filterType);
+                        } else {
+                            // 상태 표시 업데이트 (데이터가 모두 준비된 후 한 번만 호출)
+                            updateStatus();
+                        }
                     } else {
-                        // 상태 표시 업데이트 (데이터가 모두 준비된 후 한 번만 호출)
-                        updateStatus();
+                        console.log('[INFO] 구글시트 데이터 변경 없음 - 업데이트 건너뜀');
+                        // 데이터가 변경되지 않았어도 현재 이미지의 UI는 업데이트 (로컬 변경사항 반영)
                     }
                     
-                    // 현재 이미지의 UI 업데이트
+                    // 현재 이미지의 UI 업데이트 (항상 수행)
                     if (currentImageData && currentImageData.image_id) {
                         updateReviewStatusUI(currentImageData.image_id);
                     }

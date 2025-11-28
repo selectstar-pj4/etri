@@ -2379,7 +2379,7 @@ def save_annotation():
     data = request.json
     
     # Validation: Check required fields (bbox는 선택사항)
-    required_fields = ['question', 'response', 'view']
+    required_fields = ['question', 'response', 'view', 'rationale']
     missing_fields = []
     
     for field in required_fields:
@@ -2396,6 +2396,55 @@ def save_annotation():
             'missing_fields': missing_fields,
             'message': f'Please fill in: {", ".join(missing_fields)}'
         }), 400
+    
+    # Rationale 내용 검증 및 정리: (a), (b), (c), (d) 및 (ATT), (POS), (REL) 같은 패턴 제거
+    rationale = data.get('rationale', '').strip()
+    if rationale:
+        # (a), (b), (c), (d) 패턴 제거
+        rationale = re.sub(r'\([abcd]\)', '', rationale, flags=re.IGNORECASE)
+        # (ATT), (POS), (REL) 패턴 제거
+        rationale = re.sub(r'\(ATT\)', '', rationale, flags=re.IGNORECASE)
+        rationale = re.sub(r'\(POS\)', '', rationale, flags=re.IGNORECASE)
+        rationale = re.sub(r'\(REL\)', '', rationale, flags=re.IGNORECASE)
+        # 연속된 공백 정리
+        rationale = re.sub(r'\s+', ' ', rationale).strip()
+        # annotation에 정리된 rationale 저장
+        data['rationale'] = rationale
+    
+    # Rationale에 객관식 선지 단어가 포함되어 있는지 검증
+    question = data.get('question', '').strip()
+    if question and rationale:
+        # question에서 <choice> 태그 파싱
+        choice_match = re.search(r'<choice>(.*?)</choice>', question, re.IGNORECASE)
+        if choice_match:
+            choice_content = choice_match.group(1)
+            # 각 선지 텍스트 추출
+            choices = {}
+            for letter in ['a', 'b', 'c', 'd']:
+                pattern = rf'\({letter}\)\s*([^,)]+)'
+                match = re.search(pattern, choice_content, re.IGNORECASE)
+                if match:
+                    choices[letter] = match.group(1).strip()
+            
+            # 선지가 있으면 rationale에 선지 단어가 포함되어 있는지 확인
+            if choices:
+                all_choice_words = []
+                for choice_text in choices.values():
+                    # 선지 텍스트를 단어로 분리 (2글자 이상인 단어만)
+                    words = [w.lower() for w in choice_text.split() if len(w) > 2]
+                    all_choice_words.extend(words)
+                
+                # rationale을 소문자로 변환하여 검색
+                rationale_lower = rationale.lower()
+                
+                # 선지 단어 중 하나라도 rationale에 포함되어 있는지 확인
+                found_words = [word for word in all_choice_words if word in rationale_lower]
+                
+                if not found_words:
+                    return jsonify({
+                        'error': 'Rationale must contain words from the choices',
+                        'message': f'Rationale에 객관식 선지의 단어가 포함되어야 합니다. 선지: {", ".join(choices.values())}'
+                    }), 400
     
     # Get image info
     image_id = data['image_id']
@@ -2434,7 +2483,7 @@ def save_annotation():
         'image_resolution': f"{image_info['width']}x{image_info['height']}",  # 원본 이미지 크기 (web_annotations_exo.json, web_annotations_ego.json에만 저장)
         'question': data['question'],
         'response': data['response'],
-        'rationale': data.get('rationale', ''),
+        'rationale': data.get('rationale', ''),  # 이미 정리된 rationale 사용
         'question_ko': data.get('question_ko', ''),  # 한글 질문 추가
         'rationale_ko': data.get('rationale_ko', ''),  # 한글 근거 추가
         'view': view_type,
@@ -2932,8 +2981,13 @@ def sync_from_sheets():
             review_status = row.get('검수', '') or row.get('검수 상태', '')
             note = row.get('비고', '') or row.get('검수 의견', '')
             revision_status = row.get('수정여부', '') or row.get('수정 여부', '')
+            view = row.get('View', '') or row.get('view', '')
             
             if not image_id:
+                continue
+            
+            # view 필터링: ego만 처리 (클라이언트에서 ego_images만 사용)
+            if view and view.lower() != 'ego':
                 continue
             
             image_info = {
@@ -2950,6 +3004,11 @@ def sync_from_sheets():
                 failed_images.append(image_info)
             elif review_status == '납품 완료':
                 completed_images.append(image_info)
+        
+        # image_id로 정렬하여 일관성 보장
+        passed_images.sort(key=lambda x: x['image_id'] if isinstance(x['image_id'], int) else 0)
+        failed_images.sort(key=lambda x: x['image_id'] if isinstance(x['image_id'], int) else 0)
+        completed_images.sort(key=lambda x: x['image_id'] if isinstance(x['image_id'], int) else 0)
         
         return jsonify({
             'success': True,
