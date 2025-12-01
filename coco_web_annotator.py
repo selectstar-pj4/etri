@@ -3145,7 +3145,7 @@ def get_images_by_status():
     """
     상태별로 이미지 리스트를 필터링하여 반환
     Query parameters:
-        - status: 'all', 'unfinished', 'passed', 'failed', 'delivered', 'completed', 'skipped'
+        - status: 'all', 'unfinished', 'working', 'passed', 'failed', 'delivered', 'completed', 'skipped'
         - worker_id: 작업자 ID (선택, 없으면 WORKER_ID 사용)
     """
     try:
@@ -3209,7 +3209,10 @@ def get_images_by_status():
                 image_status = 'failed'
             elif review_status == '납품 완료':
                 image_status = 'delivered'
-            elif 저장시간:  # 저장은 했지만 검수 상태가 없는 경우
+            elif 저장시간 and not review_status:
+                # 작업: 저장시간이 있지만 검수 상태가 없는 것 (SKIP은 이미 제외됨)
+                image_status = 'working'
+            elif 저장시간:  # 저장은 했지만 검수 상태가 없는 경우 (기타)
                 image_status = 'completed'
             
             # 필터링
@@ -3222,15 +3225,18 @@ def get_images_by_status():
                     '수정여부': sheet_info.get('수정여부', ''),
                     '비고': sheet_info.get('비고', '')
                 })
-            elif status == 'unfinished' and image_status == 'unfinished':
-                filtered_images.append({
-                    'image_id': image_id,
-                    'status': image_status,
-                    'review_status': review_status,
-                    '저장시간': 저장시간,
-                    '수정여부': sheet_info.get('수정여부', ''),
-                    '비고': sheet_info.get('비고', '')
-                })
+            elif status == 'unfinished':
+                # 미작업: Google Sheets에 있지만 다른 상태가 아닌 것
+                # (작업, 납품완료, 통과, 불통, 검수대기, SKIP이 아닌 것)
+                if image_status == 'unfinished':
+                    filtered_images.append({
+                        'image_id': image_id,
+                        'status': image_status,
+                        'review_status': review_status,
+                        '저장시간': 저장시간,
+                        '수정여부': sheet_info.get('수정여부', ''),
+                        '비고': sheet_info.get('비고', '')
+                    })
             elif status == 'passed' and image_status == 'passed':
                 filtered_images.append({
                     'image_id': image_id,
@@ -3258,6 +3264,15 @@ def get_images_by_status():
                     '수정여부': sheet_info.get('수정여부', ''),
                     '비고': sheet_info.get('비고', '')
                 })
+            elif status == 'working' and image_status == 'working':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
             elif status == 'delivered' and image_status == 'delivered':
                 filtered_images.append({
                     'image_id': image_id,
@@ -3276,6 +3291,20 @@ def get_images_by_status():
                     '수정여부': sheet_info.get('수정여부', ''),
                     '비고': sheet_info.get('비고', '')
                 })
+        
+        # 미작업 필터링: Google Sheets에 없는 이미지도 포함
+        if status == 'unfinished':
+            for image_id in all_ego_image_ids:
+                if image_id not in sheet_data_map:
+                    # Google Sheets에 없는 이미지는 미작업
+                    filtered_images.append({
+                        'image_id': image_id,
+                        'status': 'unfinished',
+                        'review_status': '',
+                        '저장시간': '',
+                        '수정여부': '',
+                        '비고': ''
+                    })
         
         # image_id로 정렬
         filtered_images.sort(key=lambda x: x['image_id'])
@@ -3514,6 +3543,7 @@ def get_work_statistics():
         stats = {
             'total': all_ego_count,
             'unfinished': 0,
+            'working': 0,  # 작업: 구글시트에 저장시간이 있지만 검수가 안된 것 (SKIP 제외)
             'passed': 0,
             'failed': 0,
             'delivered': 0,
@@ -3604,6 +3634,10 @@ def get_work_statistics():
             elif review_status == '납품 완료' or review_status == '납품완료':
                 stats['delivered'] += 1
                 print(f"[DEBUG] 납품완료 카운트: Image ID {image_id}, review_status='{review_status}'")
+            elif 저장시간 and not review_status:
+                # 작업: 저장시간이 있지만 검수 상태가 없는 것 (SKIP은 이미 제외됨)
+                stats['working'] += 1
+                print(f"[DEBUG] 작업 카운트: Image ID {image_id}, 저장시간='{저장시간}', review_status='{review_status}'")
         
         # 2단계: annotator.image_ids에 있지만 Google Sheets에 없는 image_id는 미작업으로 카운트하지 않음
         # (이미 전체 개수에서 계산됨)
@@ -3626,11 +3660,11 @@ def get_work_statistics():
                 pending_review_count += 1
                 print(f"[DEBUG] 검수대기 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
         
-        # 미작업 = 총 이미지 - 납품완료 - 통과 - 불통 - 검수대기 - skip
+        # 미작업 = 전체 이미지 - 작업 - 납품완료 - 통과 - 불통 - 검수대기 - SKIP
         # 디버깅: 각 카운트 출력
-        print(f"[DEBUG] 통계 계산: 전체={stats['total']}, 납품완료={stats['delivered']}, 통과={stats['passed']}, 불통={stats['failed']}, 검수대기={pending_review_count}, SKIP={stats['skipped']}")
-        stats['unfinished'] = stats['total'] - stats['delivered'] - stats['passed'] - stats['failed'] - pending_review_count - stats['skipped']
-        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {pending_review_count} - {stats['skipped']}")
+        print(f"[DEBUG] 통계 계산: 전체={stats['total']}, 작업={stats['working']}, 납품완료={stats['delivered']}, 통과={stats['passed']}, 불통={stats['failed']}, 검수대기={pending_review_count}, SKIP={stats['skipped']}")
+        stats['unfinished'] = stats['total'] - stats['working'] - stats['delivered'] - stats['passed'] - stats['failed'] - pending_review_count - stats['skipped']
+        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['working']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {pending_review_count} - {stats['skipped']}")
         if stats['unfinished'] < 0:
             stats['unfinished'] = 0  # 음수 방지
         
