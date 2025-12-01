@@ -2101,6 +2101,7 @@
         }
 
         // 통계 로드 및 표시
+        let isFirstStatisticsLoad = true;
         async function loadStatistics() {
             try {
                 const response = await fetch('/api/work_statistics');
@@ -2111,6 +2112,16 @@
                     
                     // 상태바 업데이트 (통계가 변경되었으므로)
                     updateStatus();
+                    
+                    // 첫 통계 로드 시 미작업 필터링 자동 적용
+                    if (isFirstStatisticsLoad) {
+                        isFirstStatisticsLoad = false;
+                        // 통계 로드 후 약간의 지연을 두고 미작업 필터링 적용
+                        setTimeout(() => {
+                            console.log('[DEBUG] 첫 로드 시 미작업 필터링 자동 적용');
+                            filterByStatus('unfinished');
+                        }, 500);
+                    }
                 }
             } catch (error) {
                 console.error('통계 로드 중 오류:', error);
@@ -2183,19 +2194,45 @@
             
             // 필터링 모드 표시
             let filterModeText = '';
-            if (filterMode) {
+            let currentText = '';
+            
+            if (filterMode || currentStatusFilter) {
                 const filterTypeNames = {
                     'passed': '통과',
                     'failed': '불통',
-                    'pending': '검수 대기'
+                    'pending': '검수 대기',
+                    'unfinished': '미작업',
+                    'skipped': 'SKIP'
                 };
-                filterModeText = `[${filterTypeNames[filterType]} 이미지 보기 모드] `;
+                
+                // statusFilteredImageIds를 사용하는 경우 (filterByStatus로 필터링된 경우)
+                if (currentStatusFilter && statusFilteredImageIds.length > 0) {
+                    const filterName = filterTypeNames[currentStatusFilter] || currentStatusFilter;
+                    filterModeText = `[${filterName} 보기 모드] `;
+                    
+                    // 미작업 보기 모드인 경우
+                    if (currentStatusFilter === 'unfinished') {
+                        const unfinishedCount = statusStatistics?.unfinished || statusFilteredImageIds.length;
+                        const currentCount = statusFilteredImageIds.indexOf(currentImageData?.image_id) + 1;
+                        currentText = `현재: ${currentCount}/${unfinishedCount}`;
+                    } else {
+                        // 다른 필터링 모드
+                        const currentCount = statusFilteredImageIds.indexOf(currentImageData?.image_id) + 1;
+                        currentText = `현재: ${currentCount}/${statusFilteredImageIds.length}`;
+                    }
+                } else if (filterMode && filteredImageIds.length > 0) {
+                    // filteredImageIds를 사용하는 경우 (applyFilter로 필터링된 경우)
+                    const filterName = filterTypeNames[filterType] || filterType;
+                    filterModeText = `[${filterName} 이미지 보기 모드] `;
+                    currentText = `현재: ${currentIndex + 1} / ${filteredImageIds.length}`;
+                } else {
+                    // 필터링 모드이지만 리스트가 없는 경우
+                    currentText = `현재: ${currentIndex + 1}`;
+                }
+            } else {
+                // 필터링 모드가 아닌 경우
+                currentText = `현재: ${currentIndex + 1}`;
             }
-            
-            // 클릭 가능한 링크로 만들기
-            const currentText = filterMode ? 
-                `현재: ${currentIndex + 1} / ${filteredImageIds.length}` : 
-                `현재: ${currentIndex + 1}`;
             
             // 미작업과 SKIP 카운트 가져오기 (최신 통계 사용)
             const unfinishedCount = statusStatistics?.unfinished || 0;

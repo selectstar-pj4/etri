@@ -3361,58 +3361,102 @@ def skip_image():
         if row_to_update:
             # 먼저 헤더 확인하여 SKIP 컬럼 위치 확인
             headers = worksheet.row_values(1)
+            print(f"[DEBUG] 헤더 목록: {headers}")
             skip_col_index = None
             for idx, header in enumerate(headers, start=1):
-                if header and header.strip().upper() in ['SKIP', '스킵']:
+                header_upper = header.strip().upper() if header else ''
+                if header_upper in ['SKIP', '스킵']:
                     skip_col_index = idx
+                    print(f"[DEBUG] SKIP 헤더를 인덱스 {idx}에서 찾음: '{header}'")
                     break
             
-            if skip_col_index:
-                # 헤더에서 찾은 컬럼 사용
-                col_letter = chr(64 + skip_col_index)  # A=65, B=66, ..., J=74
-                print(f"[DEBUG] SKIP 컬럼 위치: {col_letter}{row_to_update} (인덱스: {skip_col_index})")
+            if not skip_col_index:
+                # 헤더에 SKIP 컬럼이 없으면 에러
+                print(f"[ERROR] SKIP 헤더를 찾을 수 없음. 헤더 개수: {len(headers)}")
+                print(f"[ERROR] 헤더 목록: {headers}")
+                return jsonify({'error': 'SKIP 컬럼을 찾을 수 없습니다. Google Sheets에 SKIP 헤더가 있는지 확인해주세요.'}), 500
+            
+            # 헤더에서 찾은 컬럼 사용 (A=1, B=2, ..., Z=26, AA=27, ...)
+            if skip_col_index <= 26:
+                col_letter = chr(64 + skip_col_index)  # A=65, B=66, ..., Z=90
             else:
-                # 헤더에 SKIP 컬럼이 없으면 추가
-                if len(headers) < 10:
-                    worksheet.update('J1', [['SKIP']])
-                    print(f"[DEBUG] SKIP 헤더 추가됨")
-                    skip_col_index = 10  # J열
-                    col_letter = 'J'
-                else:
-                    # J열로 업데이트 (기본값)
-                    col_letter = 'J'
-                    skip_col_index = 10
+                # 26개 이상인 경우 (AA, AB, ...)
+                first_letter = chr(64 + ((skip_col_index - 1) // 26))
+                second_letter = chr(64 + ((skip_col_index - 1) % 26) + 1)
+                col_letter = first_letter + second_letter
+            
+            print(f"[DEBUG] SKIP 컬럼 위치: {col_letter}{row_to_update} (인덱스: {skip_col_index}, 헤더: '{headers[skip_col_index-1] if skip_col_index <= len(headers) else 'N/A'}')")
             
             # SKIP 값 업데이트 (확실하게 저장)
-            print(f"[DEBUG] SKIP 값 업데이트: {col_letter}{row_to_update}")
+            print(f"[DEBUG] SKIP 값 업데이트: {col_letter}{row_to_update} (행: {row_to_update}, 열: {skip_col_index})")
             try:
                 # SKIP 열에만 'skip' 표시 (소문자)
+                # 다른 열의 값은 건드리지 않음
                 worksheet.update(f'{col_letter}{row_to_update}', [['skip']])
-                print(f"[DEBUG] SKIP 저장 성공: Image ID {image_id}")
+                print(f"[DEBUG] SKIP 저장 성공: Image ID {image_id}, 위치: {col_letter}{row_to_update}")
                 # 캐시 무효화하여 다음 읽기 시 최신 데이터 반영
                 clear_spreadsheet_cache()
             except Exception as e:
                 print(f"[ERROR] SKIP 값 업데이트 실패: {e}")
+                import traceback
+                traceback.print_exc()
                 raise
         else:
             # 새 행 추가 (최소한의 데이터)
+            headers = worksheet.row_values(1)
+            print(f"[DEBUG] 새 행 추가 - 헤더 목록: {headers}")
+            
+            # SKIP 컬럼 위치 찾기
+            skip_col_index = None
+            for idx, header in enumerate(headers, start=1):
+                header_upper = header.strip().upper() if header else ''
+                if header_upper in ['SKIP', '스킵']:
+                    skip_col_index = idx
+                    print(f"[DEBUG] 새 행 추가 - SKIP 헤더를 인덱스 {idx}에서 찾음: '{header}'")
+                    break
+            
+            if not skip_col_index:
+                print(f"[ERROR] 새 행 추가 - SKIP 헤더를 찾을 수 없음. 헤더 개수: {len(headers)}")
+                return jsonify({'error': 'SKIP 컬럼을 찾을 수 없습니다. Google Sheets에 SKIP 헤더가 있는지 확인해주세요.'}), 500
+            
             image_info = annotator.coco.imgs.get(image_id, {})
             file_name = image_info.get('file_name', '')
             # Image Path를 "/000000060515.jpg" 형식으로 변경
             image_path = f"/{file_name}" if file_name else f"/{image_id:012d}.jpg"
             
-            row_data = [
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                image_id,
-                image_path,
-                '',
-                '',
-                '',
-                '',
-                'ego',  # View 컬럼에 'ego' 설정
-                '',
-                'skip'  # SKIP 열에만 'skip' 표시 (소문자)
-            ]
+            # 헤더 개수만큼 빈 리스트 생성
+            row_data = [''] * len(headers)
+            
+            # 기본 필수 데이터만 채우기
+            # 저장시간 찾기
+            for idx, header in enumerate(headers):
+                if header and '저장시간' in header:
+                    row_data[idx] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    break
+            
+            # Image ID 찾기
+            for idx, header in enumerate(headers):
+                if header and ('Image ID' in header or 'image_id' in header.lower()):
+                    row_data[idx] = image_id
+                    break
+            
+            # Image Path 찾기
+            for idx, header in enumerate(headers):
+                if header and ('Image Path' in header or 'image_path' in header.lower()):
+                    row_data[idx] = image_path
+                    break
+            
+            # View 찾기
+            for idx, header in enumerate(headers):
+                if header and header.strip().upper() == 'VIEW':
+                    row_data[idx] = 'ego'
+                    break
+            
+            # SKIP 열에만 'skip' 저장 (정확한 위치)
+            row_data[skip_col_index - 1] = 'skip'  # 인덱스는 0부터 시작하므로 -1
+            
+            print(f"[DEBUG] 새 행 추가 - row_data: {row_data}")
+            print(f"[DEBUG] 새 행 추가 - SKIP 값은 {skip_col_index}번째 열({chr(64 + skip_col_index) if skip_col_index <= 26 else 'N/A'})에 저장됨")
             worksheet.append_row(row_data)
             print(f"[DEBUG] SKIP 새 행 추가 성공: Image ID {image_id}")
             # 캐시 무효화하여 다음 읽기 시 최신 데이터 반영
