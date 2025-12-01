@@ -133,9 +133,10 @@ def get_spreadsheet(force_refresh=False):
                 spreadsheet_cache = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
                 print("[DEBUG] 스프레드시트 객체 캐싱 완료")
             except gspread.exceptions.APIError as e:
-                error_code = e.response.get('status', '')
+                # APIError의 response는 requests.Response 객체이므로 status_code를 사용
+                error_code = getattr(e.response, 'status_code', None)
                 if error_code == 429:
-                    print("[WARN] 스프레드시트 열기 실패: 할당량 초과 (429)")
+                    # 429 에러는 조용히 처리 (로그 출력하지 않음)
                     # 캐시 무효화하여 다음 시도 시 재시도 가능하도록
                     spreadsheet_cache = None
                     return None
@@ -654,9 +655,11 @@ def get_image(index):
                 else:
                     print(f"[WARN] 구글시트 데이터도 없고 ego_images 폴더도 찾을 수 없습니다.")
         except Exception as e:
-            print(f"[WARN] 납품완료/통과 개수 계산 중 오류: {e}")
-            import traceback
-            print(f"[WARN] 상세 에러:\n{traceback.format_exc()}")
+            # 429 에러는 조용히 처리 (로그 최소화)
+            if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 429:
+                pass  # 429 에러는 로그 출력하지 않음
+            else:
+                print(f"[WARN] 납품완료/통과 개수 계산 중 오류: {e}")
             # 에러 발생 시 ego_images 폴더 개수 사용
             if total_ego_images > 0:
                 remaining_count = total_ego_images
@@ -2876,17 +2879,16 @@ def read_from_google_sheets(worker_id):
         return result
         
     except gspread.exceptions.APIError as e:
-        error_code = e.response.get('status', '')
+        # APIError의 response는 requests.Response 객체이므로 status_code를 사용
+        error_code = getattr(e.response, 'status_code', None)
         if error_code == 429:
-            # 할당량 초과 에러 - 캐시 무효화
-            print(f"[WARN] Google Sheets API 할당량 초과 (429): 잠시 후 다시 시도해주세요.")
+            # 할당량 초과 에러 - 캐시 무효화 (로그 최소화)
             clear_spreadsheet_cache()  # 캐시 무효화하여 다음 시도 시 재시도 가능하도록
             # 빈 리스트 반환 (에러 발생 시 기본값)
             return []
         else:
+            # 429가 아닌 다른 에러만 로그 출력
             print(f"[ERROR] Google Sheets API 오류 ({error_code}): {e}")
-            import traceback
-            print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
             return []
     except Exception as e:
         print(f"[ERROR] Google Sheets 읽기 중 오류: {e}")
@@ -3133,10 +3135,23 @@ def get_review_status(image_id):
             'message': 'Image ID not found in sheet.'
         })
         
+    except gspread.exceptions.APIError as e:
+        # 429 에러는 조용히 처리 (로그 최소화)
+        error_code = getattr(e.response, 'status_code', None)
+        if error_code == 429:
+            # 429 에러는 빈 응답 반환 (로그 출력하지 않음)
+            return jsonify({
+                'success': False,
+                'image_id': image_id,
+                'status': '',
+                'note': '',
+                'revision_status': ''
+            }), 200
+        else:
+            print(f"[ERROR] 검수 상태 조회 중 오류 ({error_code}): {e}")
+            return jsonify({'error': f'검수 상태 조회 실패: {str(e)}'}), 500
     except Exception as e:
         print(f"[ERROR] 검수 상태 조회 중 오류: {e}")
-        import traceback
-        print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
         return jsonify({'error': f'검수 상태 조회 실패: {str(e)}'}), 500
 
 
@@ -3498,10 +3513,11 @@ def skip_image():
         })
         
     except gspread.exceptions.APIError as e:
-        error_code = e.response.get('status', '')
+        # APIError의 response는 requests.Response 객체이므로 status_code를 사용
+        error_code = getattr(e.response, 'status_code', None)
         if error_code == 429:
             # 할당량 초과 에러
-            print(f"[ERROR] Google Sheets API 할당량 초과 (429): {e}")
+            # 429 에러는 조용히 처리 (로그 출력하지 않음)
             return jsonify({
                 'error': 'Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.',
                 'error_code': 429,

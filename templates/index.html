@@ -760,6 +760,69 @@
     <div class="status" id="status">Ready</div>
 
     <script>
+        // 상태바 필터링 링크 클릭 이벤트 위임 (한 번만 설정, 스크립트 최상단)
+        // statusElement에 직접 이벤트 위임 적용
+        function setupStatusBarClickHandler() {
+            const statusElement = document.getElementById('status');
+            if (statusElement) {
+                // 기존 리스너 제거 (중복 방지)
+                statusElement.removeEventListener('click', handleStatusBarClick);
+                // 새 리스너 추가
+                statusElement.addEventListener('click', handleStatusBarClick);
+            }
+        }
+        
+        function handleStatusBarClick(e) {
+            // 클릭된 요소가 .filter-link인지 확인
+            let filterLink = e.target;
+            
+            // 직접 클릭한 요소가 .filter-link가 아니면 부모 요소 확인
+            if (!filterLink.classList || !filterLink.classList.contains('filter-link')) {
+                filterLink = e.target.closest('.filter-link');
+            }
+            
+            if (filterLink) {
+                e.preventDefault();
+                e.stopPropagation();
+                const filter = filterLink.getAttribute('data-filter');
+                console.log(`[DEBUG] 필터링 링크 클릭: filter=${filter}, element=`, filterLink);
+                
+                if (!filter) {
+                    console.error('[ERROR] data-filter 속성이 없습니다.');
+                    return;
+                }
+                
+                if (filter === 'unfinished' || filter === 'skipped' || filter === 'working') {
+                    // unfinished, skipped, working은 filterByStatus 사용
+                    console.log(`[DEBUG] filterByStatus 호출: ${filter}`);
+                    if (typeof filterByStatus === 'function') {
+                        filterByStatus(filter);
+                    } else {
+                        console.error('[ERROR] filterByStatus 함수가 아직 정의되지 않았습니다.');
+                        // 함수가 아직 정의되지 않았으면 잠시 후 재시도
+                        setTimeout(() => {
+                            if (typeof filterByStatus === 'function') {
+                                filterByStatus(filter);
+                            }
+                        }, 500);
+                    }
+                } else {
+                    // 다른 필터는 applyFilter 사용
+                    console.log(`[DEBUG] applyFilter 호출: ${filter}`);
+                    if (typeof applyFilter === 'function') {
+                        applyFilter(filter);
+                    } else {
+                        console.error('[ERROR] applyFilter 함수가 아직 정의되지 않았습니다.');
+                        // 함수가 아직 정의되지 않았으면 잠시 후 재시도
+                        setTimeout(() => {
+                            if (typeof applyFilter === 'function') {
+                                applyFilter(filter);
+                            }
+                        }, 500);
+                    }
+                }
+            }
+        }
         let currentIndex = 0;
         let currentImageData = null;
         let totalEgoImages = 0; // ego_images 폴더의 전체 이미지 개수 (서버에서 받은 값)
@@ -2037,18 +2100,13 @@
         }
 
         // 상태별 필터링 함수
+        // filterByStatus 재시도 카운터 (전역)
+        let filterByStatusRetryCount = 0;
+        
         async function filterByStatus(status) {
             console.log(`[DEBUG] filterByStatus 호출: status=${status}`);
             
-            // annotator가 초기화되지 않았으면 대기
-            if (!annotator || !annotator.image_ids || annotator.image_ids.length === 0) {
-                console.log('[DEBUG] annotator가 아직 초기화되지 않음, 1초 후 재시도');
-                setTimeout(() => {
-                    filterByStatus(status);
-                }, 1000);
-                return;
-            }
-            
+            // annotator 체크 제거 - API 호출은 annotator에 의존하지 않음
             currentStatusFilter = status;
             
             // 탭 활성화 상태 업데이트
@@ -2132,18 +2190,19 @@
                         // 이미지가 먼저 로드된 후 필터링 적용
                         setTimeout(() => {
                             console.log('[DEBUG] 첫 로드 시 미작업 필터링 자동 적용');
-                            // 이미지가 이미 로드되어 있으면 바로 필터링
-                            if (annotator && annotator.image_ids && annotator.image_ids.length > 0) {
+                            // 이미지가 로드되었는지 확인 후 필터링 적용
+                            if (currentImageData && currentImageData.image_id) {
+                                console.log('[DEBUG] 이미지 로드 완료, 미작업 필터링 적용');
                                 filterByStatus('unfinished');
                             } else {
                                 // 이미지가 아직 로드되지 않았으면 조금 더 기다림
+                                console.log('[DEBUG] 이미지 로드 대기 중, 1초 후 재시도');
                                 setTimeout(() => {
-                                    if (annotator && annotator.image_ids && annotator.image_ids.length > 0) {
-                                        filterByStatus('unfinished');
-                                    }
-                                }, 2000);
+                                    console.log('[DEBUG] 미작업 필터링 적용 (재시도)');
+                                    filterByStatus('unfinished');
+                                }, 1000);
                             }
-                        }, 2000);
+                        }, 3000);
                     }
                 }
             } catch (error) {
@@ -2237,13 +2296,13 @@
                     // 미작업 보기 모드인 경우
                     if (currentStatusFilter === 'unfinished') {
                         // 통계에서 계산된 실제 미작업 개수 사용
-                        const unfinishedCount = statusStatistics?.unfinished || 0;
+                        const unfinishedCount = (statusStatistics && typeof statusStatistics.unfinished !== 'undefined') ? statusStatistics.unfinished : statusFilteredImageIds.length;
                         const currentCount = statusFilteredImageIds.indexOf(currentImageData?.image_id) + 1;
                         currentText = `현재: ${currentCount}/${unfinishedCount}`;
                     } else if (currentStatusFilter === 'working') {
                         // 작업 보기 모드인 경우
                         // 통계에서 계산된 실제 작업 개수 사용
-                        const workingCount = statusStatistics?.working || 0;
+                        const workingCount = (statusStatistics && typeof statusStatistics.working !== 'undefined') ? statusStatistics.working : statusFilteredImageIds.length;
                         const currentCount = statusFilteredImageIds.indexOf(currentImageData?.image_id) + 1;
                         currentText = `현재: ${currentCount}/${workingCount}`;
                     } else {
@@ -2266,9 +2325,10 @@
             }
             
             // 미작업, 작업, SKIP 카운트 가져오기 (최신 통계 사용)
-            const unfinishedCount = statusStatistics?.unfinished || 0;
-            const workingCount = statusStatistics?.working || 0;
-            const skippedCount = statusStatistics?.skipped || 0;
+            // statusStatistics가 없으면 기본값 0 사용
+            const unfinishedCount = (statusStatistics && typeof statusStatistics.unfinished !== 'undefined') ? statusStatistics.unfinished : 0;
+            const workingCount = (statusStatistics && typeof statusStatistics.working !== 'undefined') ? statusStatistics.working : 0;
+            const skippedCount = (statusStatistics && typeof statusStatistics.skipped !== 'undefined') ? statusStatistics.skipped : 0;
             
             // 남은 이미지 대신 미작업을 사용 (미작업 = 남은 이미지)
             const statusHTML = `${filterModeText}${currentText} | 미작업: <span class="filter-link" data-filter="unfinished" style="text-decoration: underline; cursor: pointer; color: #ff9800;">${unfinishedCount}</span> | 작업: <span class="filter-link" data-filter="working" style="text-decoration: underline; cursor: pointer; color: #2196F3;">${workingCount}</span> | 납품완료: ${completedCount} | ` +
@@ -2279,25 +2339,8 @@
             
             statusElement.innerHTML = statusHTML;
             
-            // 필터링 링크에 이벤트 리스너 추가
-            const filterLinks = statusElement.querySelectorAll('.filter-link');
-            filterLinks.forEach(link => {
-                link.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const filter = this.getAttribute('data-filter');
-                    console.log(`[DEBUG] 필터링 링크 클릭: filter=${filter}`);
-                    if (filter === 'unfinished' || filter === 'skipped' || filter === 'working') {
-                        // unfinished, skipped, working은 filterByStatus 사용
-                        console.log(`[DEBUG] filterByStatus 호출: ${filter}`);
-                        filterByStatus(filter);
-                    } else {
-                        // 다른 필터는 applyFilter 사용
-                        console.log(`[DEBUG] applyFilter 호출: ${filter}`);
-                        applyFilter(filter);
-                    }
-                });
-            });
+            // 상태바 클릭 이벤트 핸들러 재설정 (innerHTML 교체 후)
+            setupStatusBarClickHandler();
             
             // 필터링 모드 해제 링크에 이벤트 리스너 추가
             const clearFilterLink = statusElement.querySelector('.clear-filter-link');
@@ -3626,6 +3669,9 @@
         // DOM이 준비되면 첫 이미지 로드 (loadImage 함수 내부에서 localStorage 확인)
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function() {
+                // 상태바 클릭 이벤트 핸들러 초기 설정
+                setupStatusBarClickHandler();
+                
                 loadWorkerId();
                 loadReviewStatusDataFromStorage(); // localStorage에서 reviewStatusData 복원
                 
@@ -3633,6 +3679,7 @@
                 loadLastImage();
                 
                 // 페이지 로드 시 통계 로드 (이미지 로드 후)
+                // 통계 로드가 완료되면 자동으로 미작업 필터링이 적용됨
                 setTimeout(() => {
                     loadStatistics();
                 }, 1500);
@@ -3649,11 +3696,20 @@
             }, 30 * 60 * 1000); // 30분 = 1800000ms (API 호출 최소화)
             });
         } else {
+            // 상태바 클릭 이벤트 핸들러 초기 설정
+            setupStatusBarClickHandler();
+            
             loadWorkerId();
             loadReviewStatusDataFromStorage(); // localStorage에서 reviewStatusData 복원
             
-            // 페이지 로드 시 통계 로드
-            loadStatistics();
+            // 첫 이미지 먼저 로드 (localStorage 확인 후)
+            loadLastImage();
+            
+            // 페이지 로드 시 통계 로드 (이미지 로드 후)
+            // 통계 로드가 완료되면 자동으로 미작업 필터링이 적용됨
+            setTimeout(() => {
+                loadStatistics();
+            }, 1500);
             // 2분마다 통계 갱신 (API 호출 최소화)
             setInterval(loadStatistics, 120000);
             
