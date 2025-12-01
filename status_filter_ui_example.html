@@ -1,0 +1,246 @@
+<!-- 
+상태별 필터링 UI 추가 예시
+templates/index.html에 추가할 코드
+-->
+
+<!-- 1. 상태 필터 탭 추가 (헤더 아래에 추가) -->
+<div class="status-filter-tabs" style="
+    display: flex;
+    gap: 10px;
+    margin: 15px 0;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex-wrap: wrap;
+">
+    <button class="status-tab active" data-status="all" onclick="filterByStatus('all')">
+        전체 (<span id="count-all">0</span>)
+    </button>
+    <button class="status-tab" data-status="unfinished" onclick="filterByStatus('unfinished')">
+        미작업 (<span id="count-unfinished">0</span>)
+    </button>
+    <button class="status-tab" data-status="failed" onclick="filterByStatus('failed')">
+        불통 (<span id="count-failed">0</span>)
+    </button>
+    <button class="status-tab" data-status="passed" onclick="filterByStatus('passed')">
+        통과 (<span id="count-passed">0</span>)
+    </button>
+    <button class="status-tab" data-status="delivered" onclick="filterByStatus('delivered')">
+        납품완료 (<span id="count-delivered">0</span>)
+    </button>
+    <button class="status-tab" data-status="completed" onclick="filterByStatus('completed')">
+        완료 (<span id="count-completed">0</span>)
+    </button>
+    
+    <!-- 정렬 옵션 -->
+    <select id="sortOption" onchange="applySorting()" style="
+        margin-left: auto;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background: white;
+    ">
+        <option value="oldest">오래된 순</option>
+        <option value="newest">최신 순</option>
+        <option value="image_id">이미지 ID 순</option>
+    </select>
+</div>
+
+<!-- 2. 진행률 표시 바 (선택사항) -->
+<div class="progress-section" style="
+    margin: 10px 0;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span>전체 진행률</span>
+        <span id="completion-rate">0%</span>
+    </div>
+    <div style="
+        width: 100%;
+        height: 24px;
+        background: #e0e0e0;
+        border-radius: 12px;
+        overflow: hidden;
+    ">
+        <div id="progress-bar" style="
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        "></div>
+    </div>
+    <div style="display: flex; gap: 15px; margin-top: 10px; font-size: 14px;">
+        <span>완료: <strong id="stat-completed">0</strong></span>
+        <span>미작업: <strong id="stat-unfinished">0</strong></span>
+        <span>통과: <strong id="stat-passed">0</strong></span>
+        <span>불통: <strong id="stat-failed">0</strong></span>
+        <span>납품완료: <strong id="stat-delivered">0</strong></span>
+    </div>
+</div>
+
+<style>
+.status-tab {
+    padding: 10px 20px;
+    border: 2px solid #ddd;
+    background: white;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.status-tab:hover {
+    background: #f0f0f0;
+    border-color: #999;
+}
+
+.status-tab.active {
+    background: #4CAF50;
+    color: white;
+    border-color: #4CAF50;
+}
+
+.status-tab.active:hover {
+    background: #45a049;
+}
+</style>
+
+<script>
+// 상태 필터링 관련 변수
+let currentStatusFilter = 'all';
+let currentSortBy = 'oldest';
+let statusFilteredImageIds = [];
+let statusStatistics = {};
+
+// 상태별 필터링 함수
+async function filterByStatus(status) {
+    currentStatusFilter = status;
+    
+    // 탭 활성화 상태 업데이트
+    document.querySelectorAll('.status-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelector(`[data-status="${status}"]`).classList.add('active');
+    
+    // API 호출
+    try {
+        const response = await fetch(`/api/images_by_status?status=${status}&sort_by=${currentSortBy}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            statusFilteredImageIds = data.images.map(img => img.image_id);
+            
+            // 필터링된 이미지 리스트로 작업
+            if (statusFilteredImageIds.length > 0) {
+                // 첫 번째 이미지 로드
+                const firstImageId = statusFilteredImageIds[0];
+                const firstIndex = annotator.image_ids.indexOf(firstImageId);
+                if (firstIndex !== -1) {
+                    currentIndex = firstIndex;
+                    loadImage(currentIndex);
+                }
+            } else {
+                alert('해당 상태의 이미지가 없습니다.');
+            }
+        }
+    } catch (error) {
+        console.error('필터링 중 오류:', error);
+        alert('필터링 중 오류가 발생했습니다.');
+    }
+}
+
+// 정렬 적용
+function applySorting() {
+    currentSortBy = document.getElementById('sortOption').value;
+    filterByStatus(currentStatusFilter);
+}
+
+// 통계 로드 및 표시
+async function loadStatistics() {
+    try {
+        const response = await fetch('/api/work_statistics');
+        const data = await response.json();
+        
+        if (data.success) {
+            statusStatistics = data.statistics;
+            
+            // 카운트 업데이트
+            document.getElementById('count-all').textContent = statusStatistics.total;
+            document.getElementById('count-unfinished').textContent = statusStatistics.unfinished;
+            document.getElementById('count-failed').textContent = statusStatistics.failed;
+            document.getElementById('count-passed').textContent = statusStatistics.passed;
+            document.getElementById('count-delivered').textContent = statusStatistics.delivered;
+            document.getElementById('count-completed').textContent = statusStatistics.completed;
+            
+            // 진행률 업데이트
+            const completionRate = statusStatistics.completion_rate || 0;
+            document.getElementById('completion-rate').textContent = completionRate.toFixed(1) + '%';
+            document.getElementById('progress-bar').style.width = completionRate + '%';
+            document.getElementById('progress-bar').textContent = Math.round(completionRate) + '%';
+            
+            // 통계 업데이트
+            document.getElementById('stat-completed').textContent = statusStatistics.completed;
+            document.getElementById('stat-unfinished').textContent = statusStatistics.unfinished;
+            document.getElementById('stat-passed').textContent = statusStatistics.passed;
+            document.getElementById('stat-failed').textContent = statusStatistics.failed;
+            document.getElementById('stat-delivered').textContent = statusStatistics.delivered;
+        }
+    } catch (error) {
+        console.error('통계 로드 중 오류:', error);
+    }
+}
+
+// 다음/이전 이미지 이동 시 필터링된 리스트 기준으로 이동
+function navigateFilteredImages(direction) {
+    if (currentStatusFilter === 'all') {
+        // 전체 모드에서는 기존 로직 사용
+        if (direction === 'next' && currentIndex < annotator.image_ids.length - 1) {
+            loadImage(currentIndex + 1);
+        } else if (direction === 'prev' && currentIndex > 0) {
+            loadImage(currentIndex - 1);
+        }
+    } else {
+        // 필터링 모드에서는 필터링된 리스트 기준으로 이동
+        const currentImageId = annotator.image_ids[currentIndex];
+        const currentFilteredIndex = statusFilteredImageIds.indexOf(currentImageId);
+        
+        if (direction === 'next' && currentFilteredIndex < statusFilteredImageIds.length - 1) {
+            const nextImageId = statusFilteredImageIds[currentFilteredIndex + 1];
+            const nextIndex = annotator.image_ids.indexOf(nextImageId);
+            if (nextIndex !== -1) {
+                loadImage(nextIndex);
+            }
+        } else if (direction === 'prev' && currentFilteredIndex > 0) {
+            const prevImageId = statusFilteredImageIds[currentFilteredIndex - 1];
+            const prevIndex = annotator.image_ids.indexOf(prevImageId);
+            if (prevIndex !== -1) {
+                loadImage(prevIndex);
+            }
+        }
+    }
+}
+
+// 페이지 로드 시 통계 로드
+document.addEventListener('DOMContentLoaded', function() {
+    loadStatistics();
+    // 30초마다 통계 갱신
+    setInterval(loadStatistics, 30000);
+});
+
+// 이미지 저장 후 통계 갱신
+// saveAnnotation 함수 내부에 추가:
+// ... 기존 저장 로직 ...
+// 저장 성공 후:
+// loadStatistics(); // 통계 갱신
+</script>
+

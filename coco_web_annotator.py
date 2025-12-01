@@ -92,6 +92,9 @@ else:
 
 # Google Sheets 클라이언트 초기화
 google_sheets_client = None
+spreadsheet_cache = None  # 스프레드시트 객체 캐싱
+spreadsheet_cache_lock = threading.Lock()  # 스레드 안전성을 위한 락
+
 if GOOGLE_SHEETS_AVAILABLE and GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_SHEETS_CREDENTIALS_PATH:
     try:
         if os.path.exists(GOOGLE_SHEETS_CREDENTIALS_PATH):
@@ -108,6 +111,54 @@ if GOOGLE_SHEETS_AVAILABLE and GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_SHEETS_CR
         google_sheets_client = None
 elif GOOGLE_SHEETS_AVAILABLE:
     print("[INFO] Google Sheets 연동 비활성화 (설정 필요)")
+
+def get_spreadsheet(force_refresh=False):
+    """
+    스프레드시트 객체를 캐싱하여 반환 (API 호출 최소화)
+    
+    Args:
+        force_refresh: True이면 캐시를 무효화하고 새로 가져옴
+    """
+    global spreadsheet_cache
+    if not google_sheets_client:
+        return None
+    
+    with spreadsheet_cache_lock:
+        if spreadsheet_cache is None or force_refresh:
+            if force_refresh and spreadsheet_cache:
+                print("[DEBUG] 스프레드시트 캐시 무효화")
+                spreadsheet_cache = None
+            
+            try:
+                spreadsheet_cache = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+                print("[DEBUG] 스프레드시트 객체 캐싱 완료")
+            except gspread.exceptions.APIError as e:
+                error_code = e.response.get('status', '')
+                if error_code == 429:
+                    print("[WARN] 스프레드시트 열기 실패: 할당량 초과 (429)")
+                    # 캐시 무효화하여 다음 시도 시 재시도 가능하도록
+                    spreadsheet_cache = None
+                    return None
+                raise
+            except Exception as e:
+                print(f"[ERROR] 스프레드시트 열기 실패: {e}")
+                spreadsheet_cache = None
+                return None
+        return spreadsheet_cache
+
+def clear_spreadsheet_cache():
+    """스프레드시트 캐시 무효화"""
+    global spreadsheet_cache
+    with spreadsheet_cache_lock:
+        spreadsheet_cache = None
+        print("[DEBUG] 스프레드시트 캐시 클리어됨")
+
+def clear_spreadsheet_cache():
+    """스프레드시트 캐시 무효화"""
+    global spreadsheet_cache
+    with spreadsheet_cache_lock:
+        spreadsheet_cache = None
+        print("[DEBUG] 스프레드시트 캐시 클리어됨")
 
 class COCOWebAnnotator:
     """Web-based COCO annotation tool for creating question-response pairs."""
@@ -2689,7 +2740,9 @@ def save_to_google_sheets(worker_id, annotation, image_info):
     
     try:
         # 스프레드시트 열기
-        spreadsheet = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        spreadsheet = get_spreadsheet()
+        if not spreadsheet:
+            return False  # 할당량 초과 등으로 스프레드시트를 열 수 없음
         
         # 작업자별 시트 가져오기 또는 생성
         sheet_name = worker_id
@@ -2701,12 +2754,12 @@ def save_to_google_sheets(worker_id, annotation, image_info):
             # 헤더 추가
             headers = [
                 '저장시간', 'Image ID', 'Image Path', 'Image Resolution', 
-                'Question', 'Response', 'Rationale', 'View', 'Bbox'
+                'Question', 'Response', 'Rationale', 'View', 'Bbox', 'SKIP'
             ]
             worksheet.append_row(headers)
             # 헤더 스타일 설정 (선택사항)
             try:
-                worksheet.format('A1:I1', {'textFormat': {'bold': True}})
+                worksheet.format('A1:J1', {'textFormat': {'bold': True}})
             except:
                 pass
         
@@ -2724,6 +2777,7 @@ def save_to_google_sheets(worker_id, annotation, image_info):
                 bbox_str = str(annotation['bbox'])
         
         # 행 데이터 준비
+        skip_value = annotation.get('skip', '') or ''
         row_data = [
             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # 저장시간
             annotation.get('image_id', ''),
@@ -2733,7 +2787,8 @@ def save_to_google_sheets(worker_id, annotation, image_info):
             annotation.get('response', ''),
             annotation.get('rationale', ''),
             annotation.get('view', ''),
-            bbox_str
+            bbox_str,
+            skip_value
         ]
         
         # 같은 image_id가 이미 있는지 확인 (업데이트)
@@ -2746,7 +2801,7 @@ def save_to_google_sheets(worker_id, annotation, image_info):
         
         if row_to_update:
             # 기존 행 업데이트
-            worksheet.update(f'A{row_to_update}:I{row_to_update}', [row_data])
+            worksheet.update(f'A{row_to_update}:J{row_to_update}', [row_data])
         else:
             # 새 행 추가
             worksheet.append_row(row_data)
@@ -2777,8 +2832,10 @@ def read_from_google_sheets(worker_id):
         return []
     
     try:
-        # 스프레드시트 열기
-        spreadsheet = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        # 스프레드시트 열기 (캐싱된 객체 사용)
+        spreadsheet = get_spreadsheet()
+        if not spreadsheet:
+            return []  # 할당량 초과 등으로 스프레드시트를 열 수 없음
         
         # 작업자별 시트 가져오기
         sheet_name = worker_id
@@ -2818,6 +2875,19 @@ def read_from_google_sheets(worker_id):
         
         return result
         
+    except gspread.exceptions.APIError as e:
+        error_code = e.response.get('status', '')
+        if error_code == 429:
+            # 할당량 초과 에러 - 캐시 무효화
+            print(f"[WARN] Google Sheets API 할당량 초과 (429): 잠시 후 다시 시도해주세요.")
+            clear_spreadsheet_cache()  # 캐시 무효화하여 다음 시도 시 재시도 가능하도록
+            # 빈 리스트 반환 (에러 발생 시 기본값)
+            return []
+        else:
+            print(f"[ERROR] Google Sheets API 오류 ({error_code}): {e}")
+            import traceback
+            print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
+            return []
     except Exception as e:
         print(f"[ERROR] Google Sheets 읽기 중 오류: {e}")
         import traceback
@@ -2841,7 +2911,9 @@ def update_revision_status(worker_id, image_id, status='수정완료'):
         return False
     
     try:
-        spreadsheet = google_sheets_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        spreadsheet = get_spreadsheet()
+        if not spreadsheet:
+            return False  # 할당량 초과 등으로 스프레드시트를 열 수 없음
         worksheet = spreadsheet.worksheet(worker_id)
         
         # 모든 데이터 가져오기
@@ -3066,6 +3138,472 @@ def get_review_status(image_id):
         import traceback
         print(f"[ERROR] 상세 스택 트레이스:\n{traceback.format_exc()}")
         return jsonify({'error': f'검수 상태 조회 실패: {str(e)}'}), 500
+
+
+@app.route('/api/images_by_status', methods=['GET'])
+def get_images_by_status():
+    """
+    상태별로 이미지 리스트를 필터링하여 반환
+    Query parameters:
+        - status: 'all', 'unfinished', 'passed', 'failed', 'delivered', 'completed', 'skipped'
+        - worker_id: 작업자 ID (선택, 없으면 WORKER_ID 사용)
+    """
+    try:
+        worker_id = request.args.get('worker_id') or WORKER_ID
+        status = request.args.get('status', 'all')
+        
+        if not worker_id:
+            return jsonify({'error': '작업자 ID가 필요합니다.'}), 400
+        
+        # Google Sheets에서 데이터 읽기
+        try:
+            sheet_data = read_from_google_sheets(worker_id)
+        except Exception as e:
+            # 429 에러 등으로 읽기 실패 시 빈 리스트 반환
+            print(f"[WARN] 상태별 이미지 조회 중 Google Sheets 읽기 실패: {e}")
+            sheet_data = []
+        
+        # 모든 이미지 ID 가져오기 (ego_images 기준)
+        all_ego_image_ids = []
+        for image_id in annotator.image_ids:
+            image_info = annotator.coco.imgs[image_id]
+            file_name = image_info.get('file_name', '')
+            ego_path = os.path.join(annotator.ego_images_folder, file_name)
+            if os.path.exists(ego_path):
+                all_ego_image_ids.append(image_id)
+        
+        # Google Sheets 데이터를 image_id로 매핑
+        sheet_data_map = {}
+        for row in sheet_data:
+            image_id_str = row.get('Image ID', '') or row.get('image_id', '')
+            if image_id_str:
+                try:
+                    image_id = int(image_id_str)
+                    sheet_data_map[image_id] = {
+                        'review_status': row.get('검수', '') or row.get('검수 상태', ''),
+                        '저장시간': row.get('저장시간', ''),
+                        '수정여부': row.get('수정여부', '') or row.get('수정 여부', ''),
+                        '비고': row.get('비고', '') or row.get('검수 의견', ''),
+                        'view': row.get('View', '') or row.get('view', ''),
+                        'skip': row.get('SKIP', '') or row.get('skip', '') or row.get('스킵', '')
+                    }
+                except ValueError:
+                    continue
+        
+        # 상태별로 필터링
+        filtered_images = []
+        
+        for image_id in all_ego_image_ids:
+            sheet_info = sheet_data_map.get(image_id, {})
+            review_status = sheet_info.get('review_status', '')
+            저장시간 = sheet_info.get('저장시간', '')
+            
+            # 상태 판단
+            skip_status = sheet_info.get('skip', '').strip().upper()
+            image_status = 'unfinished'  # 기본값
+            if skip_status == 'SKIP' or skip_status == 'Y' or skip_status == 'YES':
+                image_status = 'skipped'
+            elif review_status == '통과':
+                image_status = 'passed'
+            elif review_status == '불통':
+                image_status = 'failed'
+            elif review_status == '납품 완료':
+                image_status = 'delivered'
+            elif 저장시간:  # 저장은 했지만 검수 상태가 없는 경우
+                image_status = 'completed'
+            
+            # 필터링
+            if status == 'all':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+            elif status == 'unfinished' and image_status == 'unfinished':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+            elif status == 'passed' and image_status == 'passed':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+            elif status == 'failed' and image_status == 'failed':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+            elif status == 'skipped' and image_status == 'skipped':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+            elif status == 'delivered' and image_status == 'delivered':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+            elif status == 'completed' and image_status == 'completed':
+                filtered_images.append({
+                    'image_id': image_id,
+                    'status': image_status,
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    '수정여부': sheet_info.get('수정여부', ''),
+                    '비고': sheet_info.get('비고', '')
+                })
+        
+        # image_id로 정렬
+        filtered_images.sort(key=lambda x: x['image_id'])
+        
+        return jsonify({
+            'success': True,
+            'status': status,
+            'images': filtered_images,
+            'count': len(filtered_images)
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] 상태별 이미지 조회 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'조회 실패: {str(e)}'}), 500
+
+
+@app.route('/api/skip', methods=['POST'])
+def skip_image():
+    """이미지를 SKIP 상태로 표시"""
+    try:
+        data = request.json
+        image_id = data.get('image_id')
+        worker_id = data.get('worker_id') or WORKER_ID
+        
+        if not image_id:
+            return jsonify({'error': 'image_id가 필요합니다.'}), 400
+        
+        if not worker_id:
+            return jsonify({'error': '작업자 ID가 필요합니다.'}), 400
+        
+        # Google Sheets에 SKIP 상태 저장
+        if not google_sheets_client:
+            return jsonify({'error': 'Google Sheets 클라이언트가 초기화되지 않았습니다.'}), 500
+        
+        spreadsheet = get_spreadsheet()
+        if not spreadsheet:
+            return False  # 할당량 초과 등으로 스프레드시트를 열 수 없음
+        sheet_name = worker_id
+        
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            # 시트가 없으면 생성
+            worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+            # 헤더 추가
+            headers = [
+                '저장시간', 'Image ID', 'Image Path', 'Image Resolution', 
+                'Question', 'Response', 'Rationale', 'View', 'Bbox', 'SKIP'
+            ]
+            worksheet.append_row(headers)
+            # 헤더 스타일 설정 (선택사항)
+            try:
+                worksheet.format('A1:J1', {'textFormat': {'bold': True}})
+            except:
+                pass
+        
+        # 기존 행 찾기 (API 호출 최소화: find 메서드 사용)
+        row_to_update = None
+        try:
+            # Image ID 컬럼(B열)에서 특정 image_id 찾기
+            cell = worksheet.find(str(image_id), in_column=2)  # B열 = Image ID
+            if cell:
+                row_to_update = cell.row
+                print(f"[DEBUG] Image ID {image_id}를 행 {row_to_update}에서 찾음")
+        except gspread.exceptions.CellNotFound:
+            print(f"[DEBUG] Image ID {image_id}를 찾을 수 없음 (새 행 추가)")
+            row_to_update = None
+        except Exception as e:
+            print(f"[WARN] find 메서드 실패, 전체 검색으로 대체: {e}")
+            # find 실패 시 전체 검색 (최후의 수단)
+            try:
+                existing_rows = worksheet.get_all_values()
+                for idx, row in enumerate(existing_rows[1:], start=2):  # 헤더 제외
+                    if len(row) > 1 and str(row[1]) == str(image_id):
+                        row_to_update = idx
+                        break
+            except Exception as e2:
+                print(f"[ERROR] 전체 검색도 실패: {e2}")
+                raise
+        
+        if row_to_update:
+            # 먼저 헤더 확인하여 SKIP 컬럼 위치 확인
+            headers = worksheet.row_values(1)
+            skip_col_index = None
+            for idx, header in enumerate(headers, start=1):
+                if header and header.strip().upper() in ['SKIP', '스킵']:
+                    skip_col_index = idx
+                    break
+            
+            if skip_col_index:
+                # 헤더에서 찾은 컬럼 사용
+                col_letter = chr(64 + skip_col_index)  # A=65, B=66, ..., J=74
+                print(f"[DEBUG] SKIP 컬럼 위치: {col_letter}{row_to_update} (인덱스: {skip_col_index})")
+            else:
+                # 헤더에 SKIP 컬럼이 없으면 추가
+                if len(headers) < 10:
+                    worksheet.update('J1', [['SKIP']])
+                    print(f"[DEBUG] SKIP 헤더 추가됨")
+                    skip_col_index = 10  # J열
+                    col_letter = 'J'
+                else:
+                    # J열로 업데이트 (기본값)
+                    col_letter = 'J'
+                    skip_col_index = 10
+            
+            # SKIP 값 업데이트 (확실하게 저장)
+            print(f"[DEBUG] SKIP 값 업데이트: {col_letter}{row_to_update}")
+            try:
+                # SKIP 열에만 'skip' 표시 (소문자)
+                worksheet.update(f'{col_letter}{row_to_update}', [['skip']])
+                print(f"[DEBUG] SKIP 저장 성공: Image ID {image_id}")
+                # 캐시 무효화하여 다음 읽기 시 최신 데이터 반영
+                clear_spreadsheet_cache()
+            except Exception as e:
+                print(f"[ERROR] SKIP 값 업데이트 실패: {e}")
+                raise
+        else:
+            # 새 행 추가 (최소한의 데이터)
+            image_info = annotator.coco.imgs.get(image_id, {})
+            file_name = image_info.get('file_name', '')
+            # Image Path를 "/000000060515.jpg" 형식으로 변경
+            image_path = f"/{file_name}" if file_name else f"/{image_id:012d}.jpg"
+            
+            row_data = [
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                image_id,
+                image_path,
+                '',
+                '',
+                '',
+                '',
+                'ego',  # View 컬럼에 'ego' 설정
+                '',
+                'skip'  # SKIP 열에만 'skip' 표시 (소문자)
+            ]
+            worksheet.append_row(row_data)
+            print(f"[DEBUG] SKIP 새 행 추가 성공: Image ID {image_id}")
+            # 캐시 무효화하여 다음 읽기 시 최신 데이터 반영
+            clear_spreadsheet_cache()
+        
+        return jsonify({
+            'success': True,
+            'message': 'SKIP 상태로 저장되었습니다.',
+            'image_id': image_id
+        })
+        
+    except gspread.exceptions.APIError as e:
+        error_code = e.response.get('status', '')
+        if error_code == 429:
+            # 할당량 초과 에러
+            print(f"[ERROR] Google Sheets API 할당량 초과 (429): {e}")
+            return jsonify({
+                'error': 'Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.',
+                'error_code': 429,
+                'retry_after': 60  # 60초 후 재시도 권장
+            }), 429
+        else:
+            print(f"[ERROR] Google Sheets API 오류 ({error_code}): {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Google Sheets API 오류: {str(e)}'}), 500
+    except Exception as e:
+        print(f"[ERROR] SKIP 저장 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'SKIP 저장 실패: {str(e)}'}), 500
+
+
+@app.route('/api/work_statistics', methods=['GET'])
+def get_work_statistics():
+    """작업 통계 및 진행률 계산"""
+    try:
+        worker_id = request.args.get('worker_id') or WORKER_ID
+        if not worker_id:
+            return jsonify({'error': '작업자 ID가 필요합니다.'}), 400
+        
+        sheet_data = read_from_google_sheets(worker_id)
+        print(f"[DEBUG] Google Sheets에서 읽은 데이터 개수: {len(sheet_data)}")
+        
+        # 모든 ego 이미지 개수
+        all_ego_count = 0
+        for image_id in annotator.image_ids:
+            image_info = annotator.coco.imgs[image_id]
+            file_name = image_info.get('file_name', '')
+            ego_path = os.path.join(annotator.ego_images_folder, file_name)
+            if os.path.exists(ego_path):
+                all_ego_count += 1
+        
+        # 상태별 카운트
+        stats = {
+            'total': all_ego_count,
+            'unfinished': 0,
+            'passed': 0,
+            'failed': 0,
+            'delivered': 0,
+            'completed': 0,
+            'skipped': 0
+        }
+        
+        # Google Sheets 데이터를 image_id로 매핑
+        sheet_data_map = {}
+        for row in sheet_data:
+            # Image ID 찾기 (여러 가능한 컬럼명 시도)
+            image_id_str = row.get('Image ID', '') or row.get('image_id', '') or row.get('Image ID', '')
+            if not image_id_str:
+                continue
+            
+            try:
+                image_id = int(image_id_str)
+                # View 컬럼 확인 (ego인지 확인)
+                view = row.get('View', '') or row.get('view', '') or ''
+                # View가 'ego'가 아니면 스킵 (ego 이미지만 통계에 포함)
+                if view and view.lower() != 'ego':
+                    continue
+                
+                # SKIP 컬럼 값 읽기 (대소문자 구분 없이)
+                skip_value = row.get('SKIP', '') or row.get('skip', '') or row.get('스킵', '')
+                # 검수 상태 읽기 (여러 가능한 컬럼명 시도)
+                review_status = row.get('검수', '') or row.get('검수 상태', '') or row.get('검수', '')
+                저장시간 = row.get('저장시간', '') or row.get('저장 시간', '')
+                수정여부 = row.get('수정여부', '') or row.get('수정 여부', '')
+                
+                sheet_data_map[image_id] = {
+                    'review_status': review_status,
+                    '저장시간': 저장시간,
+                    'skip': skip_value,  # 원본 값 저장 (나중에 .strip().upper() 처리)
+                    '수정여부': 수정여부,
+                    'view': view
+                }
+                
+                # 디버깅: 모든 데이터 출력
+                print(f"[DEBUG] Image ID {image_id}: View='{view}', 검수='{review_status}', SKIP='{skip_value}', 수정여부='{수정여부}'")
+            except (ValueError, TypeError) as e:
+                print(f"[WARN] Image ID 변환 실패: '{image_id_str}' - {e}")
+                continue
+        
+        # Google Sheets에 있는 모든 image_id에 대해 상태 확인
+        # annotator.image_ids에 없는 image_id도 Google Sheets에 있으면 포함
+        processed_image_ids = set()  # 이미 처리한 image_id 추적
+        
+        # 1단계: Google Sheets에 있는 모든 image_id 처리
+        print(f"[DEBUG] sheet_data_map에 있는 image_id 개수: {len(sheet_data_map)}")
+        print(f"[DEBUG] sheet_data_map의 키: {list(sheet_data_map.keys())}")
+        
+        for image_id in sheet_data_map.keys():
+            print(f"[DEBUG] 처리 중인 Image ID: {image_id}")
+            sheet_info = sheet_data_map[image_id]
+            review_status = sheet_info.get('review_status', '')
+            저장시간 = sheet_info.get('저장시간', '')
+            skip_status_raw = sheet_info.get('skip', '')
+            skip_status = skip_status_raw.strip().upper() if skip_status_raw else ''
+            revision_status = sheet_info.get('수정여부', '')
+            view = sheet_info.get('view', '')
+            
+            print(f"[DEBUG] Image ID {image_id} 상태 확인: view='{view}', review_status='{review_status}', skip_status='{skip_status}', revision_status='{revision_status}'")
+            
+            # View가 'ego'가 아니면 스킵 (이미 sheet_data_map에 넣을 때 필터링했지만 다시 확인)
+            if view and view.lower() != 'ego':
+                print(f"[WARN] Image ID {image_id}의 View가 'ego'가 아닙니다: '{view}'")
+                continue
+            
+            processed_image_ids.add(image_id)
+            
+            # SKIP 상태 우선 확인 (가장 먼저 확인)
+            if skip_status and (skip_status == 'SKIP' or skip_status == 'Y' or skip_status == 'YES'):
+                stats['skipped'] += 1
+                print(f"[DEBUG] SKIP 카운트: Image ID {image_id}, skip_status='{skip_status}' (원본: '{skip_status_raw}')")
+                continue  # SKIP이면 다른 상태 확인하지 않음
+            
+            # 검수 상태 확인
+            if review_status == '통과':
+                stats['passed'] += 1
+                print(f"[DEBUG] 통과 카운트: Image ID {image_id}, review_status='{review_status}'")
+            elif review_status == '불통':
+                # 불통: 수정완료가 아닌 불통 상태만 카운트
+                # 검수 대기(수정완료)는 별도로 계산
+                if revision_status != '수정완료' and revision_status != '수정 완료':
+                    stats['failed'] += 1
+                    print(f"[DEBUG] 불통 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
+            elif review_status == '납품 완료' or review_status == '납품완료':
+                stats['delivered'] += 1
+                print(f"[DEBUG] 납품완료 카운트: Image ID {image_id}, review_status='{review_status}'")
+        
+        # 2단계: annotator.image_ids에 있지만 Google Sheets에 없는 image_id는 미작업으로 카운트하지 않음
+        # (이미 전체 개수에서 계산됨)
+        
+        # 미작업 계산: 전체 - 통과 - 불통 - 검수 대기 - SKIP
+        # 검수 대기는 불통 중 수정완료된 것들
+        pending_review_count = 0
+        for image_id in sheet_data_map.keys():
+            sheet_info = sheet_data_map[image_id]
+            view = sheet_info.get('view', '')
+            
+            # View가 'ego'가 아니면 스킵
+            if view and view.lower() != 'ego':
+                continue
+            
+            review_status = sheet_info.get('review_status', '')
+            revision_status = sheet_info.get('수정여부', '')
+            
+            if review_status == '불통' and (revision_status == '수정완료' or revision_status == '수정 완료'):
+                pending_review_count += 1
+                print(f"[DEBUG] 검수대기 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
+        
+        # 미작업 = 총 이미지 - 납품완료 - 통과 - 불통 - 검수대기 - skip
+        # 디버깅: 각 카운트 출력
+        print(f"[DEBUG] 통계 계산: 전체={stats['total']}, 납품완료={stats['delivered']}, 통과={stats['passed']}, 불통={stats['failed']}, 검수대기={pending_review_count}, SKIP={stats['skipped']}")
+        stats['unfinished'] = stats['total'] - stats['delivered'] - stats['passed'] - stats['failed'] - pending_review_count - stats['skipped']
+        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {pending_review_count} - {stats['skipped']}")
+        if stats['unfinished'] < 0:
+            stats['unfinished'] = 0  # 음수 방지
+        
+        # 완료율 계산 (저장시간이 있는 것들)
+        completed_count = stats['passed'] + stats['failed'] + stats['delivered'] + stats['completed']
+        stats['completion_rate'] = (completed_count / stats['total'] * 100) if stats['total'] > 0 else 0
+        
+        return jsonify({
+            'success': True,
+            'statistics': stats
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] 통계 조회 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'통계 조회 실패: {str(e)}'}), 500
 
 
 @app.route('/api/remove_duplicates', methods=['POST'])
