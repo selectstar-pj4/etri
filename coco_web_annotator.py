@@ -11,6 +11,7 @@ import os
 import threading
 import tempfile
 import shutil
+import time
 from io import BytesIO
 from datetime import datetime
 
@@ -95,6 +96,14 @@ google_sheets_client = None
 spreadsheet_cache = None  # 스프레드시트 객체 캐싱
 spreadsheet_cache_lock = threading.Lock()  # 스레드 안전성을 위한 락
 
+# Google Sheets 데이터 캐싱 (API 호출 최소화)
+sheets_data_cache = {}  # {worker_id: {'data': [...], 'timestamp': float, 'lock': threading.Lock()}}
+CACHE_TTL = 30  # 30초 캐시 유지 시간
+
+# Google Sheets 데이터 캐싱 (API 호출 최소화)
+sheets_data_cache = {}  # {worker_id: {'data': [...], 'timestamp': float, 'lock': threading.Lock()}}
+CACHE_TTL = 30  # 30초 캐시 유지 시간
+
 if GOOGLE_SHEETS_AVAILABLE and GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_SHEETS_CREDENTIALS_PATH:
     try:
         if os.path.exists(GOOGLE_SHEETS_CREDENTIALS_PATH):
@@ -154,12 +163,25 @@ def clear_spreadsheet_cache():
         spreadsheet_cache = None
         print("[DEBUG] 스프레드시트 캐시 클리어됨")
 
-def clear_spreadsheet_cache():
-    """스프레드시트 캐시 무효화"""
-    global spreadsheet_cache
-    with spreadsheet_cache_lock:
-        spreadsheet_cache = None
-        print("[DEBUG] 스프레드시트 캐시 클리어됨")
+def clear_sheets_data_cache(worker_id=None):
+    """
+    Google Sheets 데이터 캐시 무효화
+    
+    Args:
+        worker_id: 특정 작업자의 캐시만 무효화 (None이면 전체 무효화)
+    """
+    global sheets_data_cache
+    if worker_id:
+        if worker_id in sheets_data_cache:
+            with sheets_data_cache[worker_id]['lock']:
+                sheets_data_cache[worker_id]['timestamp'] = 0  # 캐시 만료 처리
+                print(f"[DEBUG] {worker_id} 작업자의 데이터 캐시 무효화")
+    else:
+        # 전체 캐시 무효화
+        for wid in list(sheets_data_cache.keys()):
+            with sheets_data_cache[wid]['lock']:
+                sheets_data_cache[wid]['timestamp'] = 0
+        print("[DEBUG] 모든 작업자의 데이터 캐시 무효화")
 
 class COCOWebAnnotator:
     """Web-based COCO annotation tool for creating question-response pairs."""
@@ -539,27 +561,30 @@ def get_image(index):
                 view_type = ann.get('view', 'exo')
                 break
     
-    # view 타입에 따라 올바른 폴더에서 이미지 로드
+    # 이미지 경로 찾기: 두 폴더 모두 확인 (view_type에 관계없이)
+    alt_path_exo = os.path.join(annotator.exo_images_folder, image_info['file_name'])
+    alt_path_ego = os.path.join(annotator.ego_images_folder, image_info['file_name'])
+    
+    # 먼저 view_type에 따라 시도
     if view_type == 'ego':
-        image_path = os.path.join(annotator.ego_images_folder, image_info['file_name'])
+        image_path = alt_path_ego
     else:
-        image_path = os.path.join(annotator.exo_images_folder, image_info['file_name'])
+        image_path = alt_path_exo
     
     # 이미지가 없으면 다른 폴더에서 시도
     if not os.path.exists(image_path):
         print(f"[WARN] Image not found at {image_path}, trying alternative paths...")
-        # exo에서 찾기
-        alt_path_exo = os.path.join(annotator.exo_images_folder, image_info['file_name'])
-        alt_path_ego = os.path.join(annotator.ego_images_folder, image_info['file_name'])
         
-        if os.path.exists(alt_path_exo):
-            image_path = alt_path_exo
-            view_type = 'exo'
-            print(f"[INFO] Found image in exo_images: {image_path}")
-        elif os.path.exists(alt_path_ego):
+        # ego 폴더에서 찾기
+        if os.path.exists(alt_path_ego):
             image_path = alt_path_ego
             view_type = 'ego'
             print(f"[INFO] Found image in ego_images: {image_path}")
+        # exo 폴더에서 찾기
+        elif os.path.exists(alt_path_exo):
+            image_path = alt_path_exo
+            view_type = 'exo'
+            print(f"[INFO] Found image in exo_images: {image_path}")
         else:
             # 이미지를 찾을 수 없음
             error_msg = f"Image not found: {image_info['file_name']}\n"
@@ -2809,6 +2834,8 @@ def save_to_google_sheets(worker_id, annotation, image_info):
             # 새 행 추가
             worksheet.append_row(row_data)
         
+        # 데이터 캐시 무효화 (해당 작업자만)
+        clear_sheets_data_cache(worker_id)
         return True
         
     except Exception as e:
@@ -2820,12 +2847,14 @@ def save_to_google_sheets(worker_id, annotation, image_info):
         raise
 
 
-def read_from_google_sheets(worker_id):
+def read_from_google_sheets(worker_id, use_cache=True, force_refresh=False):
     """
-    Google Sheets에서 작업자의 어노테이션 데이터 읽기
+    Google Sheets에서 작업자의 어노테이션 데이터 읽기 (캐싱 지원)
     
     Args:
         worker_id: 작업자 ID (예: "test")
+        use_cache: 캐시 사용 여부 (기본값: True)
+        force_refresh: 강제 새로고침 (캐시 무시, 기본값: False)
         
     Returns:
         리스트: 각 행의 데이터 딕셔너리 리스트
@@ -2834,10 +2863,33 @@ def read_from_google_sheets(worker_id):
     if not google_sheets_client:
         return []
     
+    global sheets_data_cache
+    
+    # 캐시 확인 (force_refresh가 False이고 use_cache가 True일 때만)
+    if use_cache and not force_refresh:
+        if worker_id in sheets_data_cache:
+            cache_entry = sheets_data_cache[worker_id]
+            with cache_entry['lock']:
+                cache_age = time.time() - cache_entry.get('timestamp', 0)
+                if cache_age < CACHE_TTL and cache_entry.get('data') is not None:
+                    # 캐시 히트 - 캐시된 데이터 반환
+                    print(f"[DEBUG] 캐시 히트: {worker_id} (캐시 나이: {cache_age:.1f}초)")
+                    return cache_entry['data']
+    
+    # 캐시 미스 또는 만료 - 실제 API 호출
+    print(f"[DEBUG] 캐시 미스: {worker_id} - API 호출")
+    
     try:
         # 스프레드시트 열기 (캐싱된 객체 사용)
         spreadsheet = get_spreadsheet()
         if not spreadsheet:
+            # 429 에러 등으로 스프레드시트를 열 수 없을 때 캐시된 데이터 반환 시도
+            if worker_id in sheets_data_cache:
+                cache_entry = sheets_data_cache[worker_id]
+                with cache_entry['lock']:
+                    if cache_entry.get('data') is not None:
+                        print(f"[DEBUG] 스프레드시트 열기 실패, 캐시된 데이터 반환: {worker_id}")
+                        return cache_entry['data']
             return []  # 할당량 초과 등으로 스프레드시트를 열 수 없음
         
         # 작업자별 시트 가져오기
@@ -2876,15 +2928,36 @@ def read_from_google_sheets(worker_id):
             
             result.append(row_data)
         
+        # 캐시에 저장 (성공한 경우만)
+        if worker_id not in sheets_data_cache:
+            sheets_data_cache[worker_id] = {
+                'data': [],
+                'timestamp': 0,
+                'lock': threading.Lock()
+            }
+        
+        with sheets_data_cache[worker_id]['lock']:
+            sheets_data_cache[worker_id]['data'] = result
+            sheets_data_cache[worker_id]['timestamp'] = time.time()
+            print(f"[DEBUG] 캐시 저장: {worker_id} ({len(result)}개 행)")
+        
         return result
         
     except gspread.exceptions.APIError as e:
         # APIError의 response는 requests.Response 객체이므로 status_code를 사용
         error_code = getattr(e.response, 'status_code', None)
         if error_code == 429:
-            # 할당량 초과 에러 - 캐시 무효화 (로그 최소화)
-            clear_spreadsheet_cache()  # 캐시 무효화하여 다음 시도 시 재시도 가능하도록
-            # 빈 리스트 반환 (에러 발생 시 기본값)
+            # 할당량 초과 에러 - 스프레드시트 캐시 무효화
+            clear_spreadsheet_cache()
+            # 데이터 캐시는 유지 (오래된 데이터라도 보여주는 것이 나음)
+            # 캐시가 있으면 캐시된 데이터 반환 시도
+            if worker_id in sheets_data_cache:
+                cache_entry = sheets_data_cache[worker_id]
+                with cache_entry['lock']:
+                    if cache_entry.get('data') is not None:
+                        print(f"[DEBUG] 429 에러 발생, 캐시된 데이터 반환: {worker_id}")
+                        return cache_entry['data']
+            # 캐시가 없으면 빈 리스트 반환
             return []
         else:
             # 429가 아닌 다른 에러만 로그 출력
@@ -3306,6 +3379,17 @@ def get_images_by_status():
                     '수정여부': sheet_info.get('수정여부', ''),
                     '비고': sheet_info.get('비고', '')
                 })
+            elif status == 'pending':
+                # 검수 대기: 불통 상태이면서 수정완료인 것
+                if image_status == 'failed' and sheet_info.get('수정여부', '').strip() in ['수정완료', '수정 완료']:
+                    filtered_images.append({
+                        'image_id': image_id,
+                        'status': 'pending',
+                        'review_status': review_status,
+                        '저장시간': 저장시간,
+                        '수정여부': sheet_info.get('수정여부', ''),
+                        '비고': sheet_info.get('비고', '')
+                    })
         
         # 미작업 필터링: Google Sheets에 없는 이미지도 포함
         if status == 'unfinished':
@@ -3438,8 +3522,8 @@ def skip_image():
                 # 다른 열의 값은 건드리지 않음
                 worksheet.update(f'{col_letter}{row_to_update}', [['skip']])
                 print(f"[DEBUG] SKIP 저장 성공: Image ID {image_id}, 위치: {col_letter}{row_to_update}")
-                # 캐시 무효화하여 다음 읽기 시 최신 데이터 반영
-                clear_spreadsheet_cache()
+                # 데이터 캐시 무효화 (해당 작업자만)
+                clear_sheets_data_cache(worker_id)
             except Exception as e:
                 print(f"[ERROR] SKIP 값 업데이트 실패: {e}")
                 import traceback
@@ -3503,8 +3587,8 @@ def skip_image():
             print(f"[DEBUG] 새 행 추가 - SKIP 값은 {skip_col_index}번째 열({chr(64 + skip_col_index) if skip_col_index <= 26 else 'N/A'})에 저장됨")
             worksheet.append_row(row_data)
             print(f"[DEBUG] SKIP 새 행 추가 성공: Image ID {image_id}")
-            # 캐시 무효화하여 다음 읽기 시 최신 데이터 반영
-            clear_spreadsheet_cache()
+            # 데이터 캐시 무효화 (해당 작업자만)
+            clear_sheets_data_cache(worker_id)
         
         return jsonify({
             'success': True,
