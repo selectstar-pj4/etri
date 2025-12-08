@@ -206,7 +206,7 @@ class COCOWebAnnotator:
         else:
             base_name = output_basename
         
-        self.output_json_path_exo = os.path.join(output_dir, f'{base_name}_exo.json')
+        self.output_json_path_exo = os.path.join(output_dir, f'{base_name}_exo_3hop.json')
         # Ego 결과는 3-hop 전용 파일명으로 저장되도록 변경
         self.output_json_path_ego = os.path.join(output_dir, f'{base_name}_ego_3hop.json')
         
