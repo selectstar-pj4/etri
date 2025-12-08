@@ -206,9 +206,9 @@ class COCOWebAnnotator:
         else:
             base_name = output_basename
         
-        self.output_json_path_exo = os.path.join(output_dir, f'{base_name}_exo.json')
-        # Ego 결과는 3-hop 전용 파일명으로 저장되도록 변경
-        self.output_json_path_ego = os.path.join(output_dir, f'{base_name}_ego_3hop.json')
+        # 2-hop 저장 파일명으로 변경
+        self.output_json_path_exo = os.path.join(output_dir, f'{base_name}_exo.2hop.json')
+        self.output_json_path_ego = os.path.join(output_dir, f'{base_name}_ego.2hop.json')
         
         # Initialize COCO API
         self.coco = COCO(coco_json_path)
@@ -752,8 +752,8 @@ def translate_question():
             # ego_data_sample.json 형식 참고
             prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format for EGO-CENTRIC questions:
 
-CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS:
-[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS (2-hop: EXACTLY TWO TAGS):
+[Question with EXACTLY TWO tags chosen only from these pairs: (POS+REL), (ATT+REL), (POS+ATT)] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer. 🚨 NEVER include the third tag.
 
 CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
 1. If the Korean question contains "~관점에서" (from the perspective of ~):
@@ -767,7 +767,12 @@ CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
    - "내가 의자에 앉아 있을 때" → "When I'm sitting on the chair, ..."
    - "내가 테이블 앞에 서 있을 때" → "When I'm standing in front of the table, ..."
 
-CRITICAL TAG USAGE RULES:
+CRITICAL TAG USAGE RULES (2-hop):
+
+0. TAG COUNT RULE - EGO:
+   - Use EXACTLY TWO tags per question.
+   - Allowed pairs ONLY: (POS+REL), (ATT+REL), (POS+ATT).
+   - DO NOT include the third tag. NO 3-tag questions.
 
 1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
    - Examples: "farthest", "closest", "second-closest", "highest in position"
@@ -809,21 +814,27 @@ Translate to English following the EXACT format above. Make sure:
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information from the person's perspective (on the left side, on the right side, etc.)
 - <ATT> is used ONLY for attributes or target groups (round object, green object, white object, person, etc.)
+- 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (POS+REL), (ATT+REL), (POS+ATT). Do NOT add the third tag.
 - 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
 - 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
 - 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
 - All tags have meaningful content inside them
 - <choice> tag comes before "And provide..." phrase
 - DO NOT use generic phrases like "in the image" for <POS> tag
-- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags"""
+- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags and that ONLY TWO TAGS are used from the allowed pairs."""
         else:
             # exo_data_sample.json 형식 참고
             prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format:
 
-CORRECT FORMAT:
-[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+CORRECT FORMAT (2-hop: EXACTLY TWO TAGS):
+[Question with EXACTLY TWO tags chosen only from these pairs: (ATT+REL), (POS+REL), (POS+ATT)] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer. 🚨 NEVER include the third tag.
 
-CRITICAL TAG USAGE RULES:
+CRITICAL TAG USAGE RULES (2-hop):
+
+0. TAG COUNT RULE - EXO:
+   - Use EXACTLY TWO tags per question.
+   - Allowed pairs ONLY: (ATT+REL), (POS+REL), (POS+ATT).
+   - DO NOT include the third tag. NO 3-tag questions.
 
 1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
    - Examples: "farthest", "closest", "second-closest", "placed on the floor"
@@ -858,19 +869,20 @@ Translate to English following the EXACT format above. Make sure:
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
 - <ATT> is used ONLY for attributes or target groups (red object, white object, among the items, person, etc.)
+- 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (ATT+REL), (POS+REL), (POS+ATT). Do NOT add the third tag.
 - 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
 - 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
 - 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
 - All tags have meaningful content inside them
 - <choice> tag comes before "And provide..." phrase
 - DO NOT use generic phrases like "in the image" for <POS> tag
-- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags"""
+- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags and that ONLY TWO TAGS are used from the allowed pairs."""
         
         # view_type에 따라 다른 시스템 메시지 사용
         if view_type == 'ego':
-            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) EGO-CENTRIC questions. CRITICAL RULES: 1) Use 'From the perspective of ~' for '~관점에서', 2) Use 'When I'm ~' for '내가', 3) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 4) <POS> tag ONLY for position/location from person's perspective (on the left side, on the right side, etc.), 5) <ATT> tag ONLY for attributes/target groups (round object, green object, white object, person, etc.), 6) 🚨 MANDATORY: If Korean contains ANY attribute word (color, shape, material, '사람', '객체', '물체'), you MUST use <ATT> tag, 7) 🚨 MANDATORY: If Korean ends with '~사람은?' or '~객체는?', you MUST include <ATT> tag, 8) Tags MUST contain actual meaningful content, 9) Format: [Question with tags] <choice>...</choice> And provide..., 10) DO NOT use generic phrases like 'in the image' for <POS> tag, 11) DOUBLE-CHECK: Verify ALL attribute descriptions are wrapped in <ATT> tags."
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) EGO-CENTRIC questions. CRITICAL RULES: 1) EXACTLY TWO TAGS per question, allowed pairs ONLY (POS+REL), (ATT+REL), (POS+ATT) — NEVER include the third tag, 2) Use 'From the perspective of ~' for '~관점에서', 3) Use 'When I'm ~' for '내가', 4) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 5) <POS> tag ONLY for position/location from person's perspective (on the left side, on the right side, etc.), 6) <ATT> tag ONLY for attributes/target groups (round object, green object, white object, person, etc.), 7) 🚨 MANDATORY: If Korean contains ANY attribute word (color, shape, material, '사람', '객체', '물체'), you MUST use <ATT> tag, 8) 🚨 MANDATORY: If Korean ends with '~사람은?' or '~객체는?', you MUST include <ATT> tag, 9) Tags MUST contain actual meaningful content, 10) Format: [Question with tags] <choice>...</choice> And provide..., 11) DO NOT use generic phrases like 'in the image' for <POS> tag, 12) DOUBLE-CHECK: Verify ALL attribute descriptions are wrapped in <ATT> tags and ONLY TWO TAGS are present from allowed pairs."
         else:
-            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, white object, among the items, person, etc.), 4) 🚨 MANDATORY: If Korean contains ANY attribute word (color, shape, material, '사람', '객체', '물체'), you MUST use <ATT> tag, 5) 🚨 MANDATORY: If Korean ends with '~사람은?' or '~객체는?', you MUST include <ATT> tag, 6) Tags MUST contain actual meaningful content, 7) Format: [Question with tags] <choice>...</choice> And provide..., 8) DO NOT use generic phrases like 'in the image' for <POS> tag, 9) DOUBLE-CHECK: Verify ALL attribute descriptions are wrapped in <ATT> tags."
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) EXACTLY TWO TAGS per question, allowed pairs ONLY (ATT+REL), (POS+REL), (POS+ATT) — NEVER include the third tag, 2) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 3) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 4) <ATT> tag ONLY for attributes/target groups (red object, white object, among the items, person, etc.), 5) 🚨 MANDATORY: If Korean contains ANY attribute word (color, shape, material, '사람', '객체', '물체'), you MUST use <ATT> tag, 6) 🚨 MANDATORY: If Korean ends with '~사람은?' or '~객체는?', you MUST include <ATT> tag, 7) Tags MUST contain actual meaningful content, 8) Format: [Question with tags] <choice>...</choice> And provide..., 9) DO NOT use generic phrases like 'in the image' for <POS> tag, 10) DOUBLE-CHECK: Verify ALL attribute descriptions are wrapped in <ATT> tags and ONLY TWO TAGS are present from allowed pairs."
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -1175,6 +1187,12 @@ def generate_question_and_choices():
             view_type = 'exo'
             if existing_annotation:
                 view_type = existing_annotation.get('view', 'exo')
+
+            # 2-hop 태그 조합 안내 문구 (view_type별 허용 조합)
+            if view_type == 'ego':
+                allowed_tag_pairs = "(POS+REL), (ATT+REL), (POS+ATT)  # exactly two tags, NEVER the third"
+            else:
+                allowed_tag_pairs = "(ATT+REL), (POS+REL), (POS+ATT)  # exactly two tags, NEVER the third"
             
             if view_type == 'ego':
                 image_path = os.path.join(annotator.ego_images_folder, image_info['file_name'])
@@ -1236,8 +1254,9 @@ def generate_question_and_choices():
         
         client = OpenAI(api_key=OPENAI_API_KEY)
         
-        # 3-hop 질문 생성: ATT, POS, REL이 모두 포함된 복잡한 질문
-        question_generation_prompt = f"""이미지와 이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 3-hop 질문을 한글로 생성해주세요.
+        # 2-hop 질문 생성: ATT, POS, REL 중 정확히 두 가지 태그만 사용 (view_type별 허용 조합은 allowed_tag_pairs 참고)
+        question_generation_prompt = f"""이미지와 이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 2-hop 질문을 한글로 생성해주세요.
+현재 뷰 타입: {view_type} / 허용 태그 조합: {allowed_tag_pairs}
 
 🚨 **절대 필수 규칙 - 반드시 준수해야 함**:
 
@@ -1257,35 +1276,30 @@ def generate_question_and_choices():
 - [ ] ATT 속성을 만족하는 객체가 이미지에 실제로 존재하는가?
 - [ ] 이미지에 존재하지 않는 속성을 ATT로 사용하지 않았는가?
 
-**STEP 2: 복잡하고 고급 추론이 필요한 3-hop 질문 구조 생성**
+**STEP 2: 복잡하고 고급 추론이 필요한 2-hop 질문 구조 생성**
 
 🚨 **CRITICAL - 질문 복잡도 및 고급 추론 요구사항 (절대 필수)**:
 
-각 질문은 반드시 ATT(속성), POS(위치), REL(관계) 세 가지 요소를 모두 포함해야 하며, **단순한 질문은 절대 금지**입니다.
+각 질문은 ATT, POS, REL 중 **정확히 두 가지 태그만** 사용해야 합니다. 허용 조합은 {allowed_tag_pairs}이며, 세 번째 태그를 절대 포함하지 마세요. **단순한 질문은 절대 금지**입니다.
 
 **❌ 절대 금지 - 너무 단순한 질문 패턴**:
 - "X 오른쪽에 있는 가장 가까운 Y 객체" (단순 위치+속성 조합)
 - "X 위에 있는 가장 가까운 Y 객체" (단순 위치+속성 조합)
 - "X 왼쪽에 있는 가장 먼 Y 객체" (단순 위치+속성 조합)
 
-**✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문 패턴**:
+**✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문 패턴 (2-hop, 두 태그만 사용)**:
 
-1. **중첩된 조건 조합**:
-   - "X <POS>위에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z로부터 <REL>가장 먼</REL> 객체"
-   - "X <POS>왼쪽에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>앞에 있는</POS> <REL>가장 가까운</REL> 객체"
-   - "<ATT>Y 객체</ATT> 중에서 X <POS>위에 있는</POS> Z로부터 <REL>가장 먼</REL> 객체"
+1. **ATT+REL 조합** (ATT와 거리/순서 관계만, POS 금지):
+   - "<ATT>정사각형 또는 직사각형 객체</ATT> 중에서 포크로부터 <REL>가장 먼</REL> 객체"
+   - "<ATT>파티용품 객체</ATT> 중에서 사람과의 <REL>두 번째로 가까운</REL> 객체"
 
-2. **복잡한 기준점과 대상의 조합**:
-   - "X <POS>위에 있는</POS> <ATT>Y 객체</ATT>로부터 <REL>가장 먼</REL> <ATT>Z 객체</ATT>"
-   - "X <POS>앞에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>옆에 있는</POS> <REL>가장 가까운</REL> 객체"
+2. **POS+REL 조합** (위치와 관계만, ATT 금지):
+   - "테이블 <POS>왼쪽에 있는</POS> 물체들 중 <REL>가장 가까운</REL> 객체"
+   - "싱크대 <POS>앞에 있는</POS> 물체들 중 <REL>두 번째로 먼</REL> 객체"
 
-3. **여러 조건이 동시에 적용되는 질문**:
-   - "<ATT>Y 객체</ATT> 중에서 X <POS>위에</POS> <REL>놓여 있는</REL> Z <POS>앞에 있는</POS> 객체"
-   - "<ATT>Y 객체</ATT> 중에서 X <POS>옆에 있는</POS> <REL>가장 높은</REL> 객체"
-
-4. **복잡한 공간 관계**:
-   - "X <POS>앞에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>반대편에 있는</POS> <REL>가장 먼</REL> 객체"
-   - "X <POS>중앙에 있는</POS> <ATT>Y 객체</ATT> 중에서 Z <POS>옆에 있는</POS> <REL>가장 가까운</REL> 객체"
+3. **POS+ATT 조합** (위치와 속성만, REL 금지):
+   - "소파 <POS>오른쪽에 위치한</POS> <ATT>밝은 색상의 객체</ATT>"
+   - "전자레인지 <POS>위에 있는</POS> <ATT>원형 또는 원통형 객체</ATT>"
 
 **ATT (속성/대상) 규칙 - CRITICAL: 속성 기반 표현만 사용, 구체적 명사 금지**:
 - ❌ **절대 사용 금지 - 구체적 명사**: "컵", "접시", "의자", "테이블" 등
@@ -1304,7 +1318,7 @@ def generate_question_and_choices():
 - **위치 반전 규칙**: 실제로 "왼쪽"에 있으면 질문에서는 "오른쪽"으로 표현
 
 **REL (관계) 규칙**:
-- "가장 가까운", "가장 먼", "두 번째로 가까운" 등
+- "가장 가까운", "가장 먼", "두 번째로 가까운", "가장 높은", "가장 낮은", "더 높은", "더 낮은", "더 가까운", "더 먼" 등
 
 **🚨 CRITICAL - 질문 끝 표현 규칙 (절대 필수)**:
 질문은 반드시 "~객체"로 끝나야 합니다. "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요.
@@ -1463,7 +1477,7 @@ def generate_question_and_choices():
 {{
   "questions": [
     {{
-      "question": "첫 번째 3-hop 한글 질문 (ATT는 속성 기반 표현, POS는 구체적 객체 기준, REL 포함, 소거법 가능한 선택지 구성, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
+      "question": "첫 번째 2-hop 한글 질문 (허용 태그 조합만 사용, ATT는 속성 기반 표현, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
       "choices": {{
         "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
         "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
@@ -1473,7 +1487,7 @@ def generate_question_and_choices():
       "correct_answer": "a"
     }},
     {{
-      "question": "두 번째 3-hop 한글 질문 (첫 번째와 다른 구조/조합, ATT는 속성 기반 표현, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
+      "question": "두 번째 2-hop 한글 질문 (첫 번째와 다른 구조/조합, 허용 태그 조합만 사용, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
       "choices": {{
         "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
         "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
@@ -1483,7 +1497,7 @@ def generate_question_and_choices():
       "correct_answer": "b"
     }},
     {{
-      "question": "세 번째 3-hop 한글 질문 (앞의 두 질문과 다른 구조/조합, ATT는 속성 기반 표현, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
+      "question": "세 번째 2-hop 한글 질문 (앞의 두 질문과 다른 구조/조합, 허용 태그 조합만 사용, ATT 조건 만족 객체 최소 2개 이상, 반드시 '~객체'로 끝남, '는?' 또는 '는 무엇인가요?' 사용 금지)",
       "choices": {{
         "a": "선택지 a (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
         "b": "선택지 b (한글, 소거 가능한 이유가 명확해야 함, 동일 물체 중복 금지)",
@@ -1506,12 +1520,11 @@ def generate_question_and_choices():
 - "가장 가까운 것은?" (금지 - ATT 속성 미명시, "는?" 사용)
 
 **✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문**:
-- "식용 가능한 객체 중에서 포크로부터 가장 먼 객체" (ATT + REL + 기준점)
-- "테이블 위에 있는 원형 또는 원통형 객체 중에서 사람으로부터 가장 먼 객체" (POS + ATT + REL)
-- "소파 왼쪽에 있는 밝은 색상의 객체 중에서 창문으로부터 가장 가까운 객체" (POS + ATT + REL)
-- "식용 가능한 객체 중에서 포크 왼쪽에 있는 가장 먼 객체" (ATT + POS + REL)
-- "테이블 중앙에 있는 원형 또는 원통형 객체 중에서 사람 앞에 있는 가장 가까운 객체" (POS + ATT + POS + REL)
-- "식용 가능한 객체 중에서 테이블 왼쪽에 있는 포크로부터 가장 먼 객체" (ATT + POS + REL)
+- "식용 가능한 객체 중에서 포크로부터 가장 먼 객체" (ATT + REL)
+- "테이블 왼쪽에 있는 물체들 중 두 번째로 먼 객체" (POS + REL)
+- "소파 오른쪽에 위치한 밝은 색상의 객체" (POS + ATT)
+- "전자레인지 위에 있는 원형 또는 원통형 객체" (POS + ATT)
+- "파티용품 객체 중에서 사람과의 두 번째로 가까운 객체" (ATT + REL)
 
 🚨 **최종 검증 체크리스트 (생성 전 반드시 확인)**:
 
@@ -1676,8 +1689,8 @@ Use this image analysis to better understand the context and spatial relationshi
         if view_type == 'ego':
             prompt = f"""Translate the following Korean question and multiple choice options to English. You MUST follow this EXACT format for EGO-CENTRIC questions:{image_context}
 
-CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS:
-[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS (2-hop: EXACTLY TWO TAGS):
+[Question with EXACTLY TWO tags chosen only from these pairs: (POS+REL), (ATT+REL), (POS+ATT)] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer. 🚨 NEVER include the third tag.
 
 CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
 1. If the Korean question contains "~관점에서" (from the perspective of ~):
@@ -1691,7 +1704,12 @@ CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
    - "내가 의자에 앉아 있을 때" → "When I'm sitting on the chair, ..."
    - "내가 테이블 앞에 서 있을 때" → "When I'm standing in front of the table, ..."
 
-CRITICAL TAG USAGE RULES:
+CRITICAL TAG USAGE RULES (2-hop):
+
+0. TAG COUNT RULE - EGO:
+   - Use EXACTLY TWO tags per question.
+   - Allowed pairs ONLY: (POS+REL), (ATT+REL), (POS+ATT).
+   - DO NOT include the third tag. NO 3-tag questions.
 
 1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
    - Examples: "farthest", "closest", "second-closest", "highest in position"
@@ -1758,6 +1776,7 @@ Translate the Korean question and choices to English following the EXACT format 
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information from the person's perspective (on the left side, on the right side, etc.)
 - <ATT> is used ONLY for attributes or target groups (round object, green object, white object, person, etc.)
+- 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (POS+REL), (ATT+REL), (POS+ATT). Do NOT add the third tag.
 - 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
 - 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
 - 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
@@ -1770,10 +1789,15 @@ Translate the Korean question and choices to English following the EXACT format 
         else:
             prompt = f"""Translate the following Korean question and multiple choice options to English. You MUST follow this EXACT format:{image_context}
 
-CORRECT FORMAT:
-[Question with <ATT>, <POS>, <REL> tags embedded naturally in the sentence] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+CORRECT FORMAT (2-hop: EXACTLY TWO TAGS):
+[Question with EXACTLY TWO tags chosen only from these pairs: (ATT+REL), (POS+REL), (POS+ATT)] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer. 🚨 NEVER include the third tag.
 
-CRITICAL TAG USAGE RULES:
+CRITICAL TAG USAGE RULES (2-hop):
+
+0. TAG COUNT RULE - EXO:
+   - Use EXACTLY TWO tags per question.
+   - Allowed pairs ONLY: (ATT+REL), (POS+REL), (POS+ATT).
+   - DO NOT include the third tag. NO 3-tag questions.
 
 1. <REL> tag - Use ONLY for RELATIONSHIP terms (distance, order, placement):
    - Examples: "farthest", "closest", "second-closest", "placed on the floor"
@@ -1846,6 +1870,7 @@ Translate the Korean question and choices to English following the EXACT format 
 - <REL> is used ONLY for relationship terms (farthest, closest, etc.)
 - <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
 - <ATT> is used ONLY for attributes or target groups (red object, white object, among the items, person, etc.)
+- 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (ATT+REL), (POS+REL), (POS+ATT). Do NOT add the third tag.
 - 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
 - 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
 - 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
@@ -1858,9 +1883,9 @@ Translate the Korean question and choices to English following the EXACT format 
         
         # view_type에 따라 다른 시스템 메시지 사용
         if view_type == 'ego':
-            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) EGO-CENTRIC questions. CRITICAL RULES: 1) Use 'From the perspective of ~' for '~관점에서', 2) Use 'When I'm ~' for '내가', 3) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 4) <POS> tag ONLY for position/location from person's perspective (on the left side, on the right side, etc.), 5) <ATT> tag ONLY for attributes/target groups (round object, green object, etc.), 6) Tags MUST contain actual meaningful content, 7) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 8) DO NOT use generic phrases like 'in the image' for <POS> tag, 9) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) EGO-CENTRIC questions. CRITICAL RULES: 1) EXACTLY TWO TAGS per question, allowed pairs ONLY (POS+REL), (ATT+REL), (POS+ATT) — NEVER include the third tag, 2) Use 'From the perspective of ~' for '~관점에서', 3) Use 'When I'm ~' for '내가', 4) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 5) <POS> tag ONLY for position/location from person's perspective (on the left side, on the right side, etc.), 6) <ATT> tag ONLY for attributes/target groups (round object, green object, etc.), 7) Tags MUST contain actual meaningful content, 8) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 9) DO NOT use generic phrases like 'in the image' for <POS> tag, 10) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."
         else:
-            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 2) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 3) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 4) Tags MUST contain actual meaningful content, 5) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 6) DO NOT use generic phrases like 'in the image' for <POS> tag, 7) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."
+            system_message = "You are a professional translator specializing in VQA (Visual Question Answering) questions. CRITICAL RULES: 1) EXACTLY TWO TAGS per question, allowed pairs ONLY (ATT+REL), (POS+REL), (POS+ATT) — NEVER include the third tag, 2) <REL> tag ONLY for relationship terms (farthest, closest, etc.), 3) <POS> tag ONLY for position/location (in the center, on the left side, etc.), 4) <ATT> tag ONLY for attributes/target groups (red object, among the items, etc.), 5) Tags MUST contain actual meaningful content, 6) Format: [Question with tags] <choice>...</choice> And provide... (choice tag BEFORE 'And provide' phrase), 7) DO NOT use generic phrases like 'in the image' for <POS> tag, 8) Choices MUST be in concise adjective+noun or noun+noun format (e.g., 'black shirt person', 'glasses person'), NOT full sentences."
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
