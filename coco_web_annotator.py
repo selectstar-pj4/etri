@@ -3784,16 +3784,36 @@ def skip_image():
                 print(f"[ERROR] 전체 검색도 실패: {e2}")
                 raise
         
+        # view 추론: 파일 존재 여부 우선, 없으면 annotation의 view 사용
+        image_info = annotator.coco.imgs.get(image_id, {})
+        file_name = image_info.get('file_name', '')
+        exo_path = os.path.join(annotator.exo_images_folder, file_name) if file_name else ''
+        ego_path = os.path.join(annotator.ego_images_folder, file_name) if file_name else ''
+        detected_view = 'exo'
+        if ego_path and os.path.exists(ego_path):
+            detected_view = 'ego'
+        elif exo_path and os.path.exists(exo_path):
+            detected_view = 'exo'
+        else:
+            for ann in annotator.annotations:
+                if ann.get('image_id') == image_id:
+                    detected_view = ann.get('view', 'exo')
+                    break
+
         if row_to_update:
             # 먼저 헤더 확인하여 SKIP 컬럼 위치 확인
             headers = worksheet.row_values(1)
             print(f"[DEBUG] 헤더 목록: {headers}")
             skip_col_index = None
+            view_col_index = None
             for idx, header in enumerate(headers, start=1):
                 header_upper = header.strip().upper() if header else ''
                 if header_upper in ['SKIP', '스킵']:
                     skip_col_index = idx
                     print(f"[DEBUG] SKIP 헤더를 인덱스 {idx}에서 찾음: '{header}'")
+                if header_upper == 'VIEW':
+                    view_col_index = idx
+                if skip_col_index and view_col_index:
                     break
             
             if not skip_col_index:
@@ -3820,6 +3840,16 @@ def skip_image():
                 # 다른 열의 값은 건드리지 않음
                 worksheet.update(f'{col_letter}{row_to_update}', [['skip']])
                 print(f"[DEBUG] SKIP 저장 성공: Image ID {image_id}, 위치: {col_letter}{row_to_update}")
+                # View 열도 갱신 (있을 때만)
+                if view_col_index:
+                    if view_col_index <= 26:
+                        view_col_letter = chr(64 + view_col_index)
+                    else:
+                        first_letter = chr(64 + ((view_col_index - 1) // 26))
+                        second_letter = chr(64 + ((view_col_index - 1) % 26) + 1)
+                        view_col_letter = first_letter + second_letter
+                    worksheet.update(f'{view_col_letter}{row_to_update}', [[detected_view]])
+                    print(f"[DEBUG] VIEW 저장 성공: {detected_view} -> {view_col_letter}{row_to_update}")
                 # 데이터 캐시 무효화 (해당 작업자만)
                 clear_sheets_data_cache(worker_id)
             except Exception as e:
@@ -3845,8 +3875,6 @@ def skip_image():
                 print(f"[ERROR] 새 행 추가 - SKIP 헤더를 찾을 수 없음. 헤더 개수: {len(headers)}")
                 return jsonify({'error': 'SKIP 컬럼을 찾을 수 없습니다. Google Sheets에 SKIP 헤더가 있는지 확인해주세요.'}), 500
             
-            image_info = annotator.coco.imgs.get(image_id, {})
-            file_name = image_info.get('file_name', '')
             # Image Path를 "/000000060515.jpg" 형식으로 변경
             image_path = f"/{file_name}" if file_name else f"/{image_id:012d}.jpg"
             
@@ -3875,7 +3903,7 @@ def skip_image():
             # View 찾기
             for idx, header in enumerate(headers):
                 if header and header.strip().upper() == 'VIEW':
-                    row_data[idx] = 'ego'
+                    row_data[idx] = detected_view
                     break
             
             # SKIP 열에만 'skip' 저장 (정확한 위치)
