@@ -100,6 +100,10 @@ spreadsheet_cache_lock = threading.Lock()  # 스레드 안전성을 위한 락
 sheets_data_cache = {}  # {worker_id: {'data': [...], 'timestamp': float, 'lock': threading.Lock()}}
 CACHE_TTL = 30  # 30초 캐시 유지 시간
 
+# 작업 통계 캐시 (work_statistics 전용)
+stats_cache = {}  # {worker_id: {'data': {...}, 'timestamp': float, 'lock': threading.Lock()}}
+STATS_CACHE_TTL = 5  # 5초 캐시 유지
+
 # Google Sheets 데이터 캐싱 (API 호출 최소화)
 sheets_data_cache = {}  # {worker_id: {'data': [...], 'timestamp': float, 'lock': threading.Lock()}}
 CACHE_TTL = 30  # 30초 캐시 유지 시간
@@ -3402,7 +3406,8 @@ def sync_from_sheets():
             return jsonify({'error': '작업자 ID가 설정되지 않았습니다.'}), 400
         
         # 구글 시트에서 데이터 읽기
-        sheet_data = read_from_google_sheets(worker_id)
+        # 통계는 실시간성이 중요하므로 캐시를 우회하고 강제 새로고침
+        sheet_data = read_from_google_sheets(worker_id, use_cache=False, force_refresh=True)
         
         # 검수 상태별로 분류
         passed_images = []  # 통과
@@ -3571,8 +3576,9 @@ def get_images_by_status():
         
         for image_id in all_image_ids:
             sheet_info = sheet_data_map.get(image_id, {})
-            review_status = sheet_info.get('review_status', '')
+            review_status = (sheet_info.get('review_status', '') or '').strip()
             저장시간 = sheet_info.get('저장시간', '')
+            revision_status = (sheet_info.get('수정여부', '') or '').strip()
             
             # 상태 판단
             skip_status = sheet_info.get('skip', '').strip().upper()
@@ -3582,8 +3588,12 @@ def get_images_by_status():
             elif review_status == '통과':
                 image_status = 'passed'
             elif review_status == '불통':
-                image_status = 'failed'
-            elif review_status == '납품 완료':
+                # 수정완료/검수대기를 pending으로 분리
+                if revision_status == '수정완료' or revision_status == '수정 완료':
+                    image_status = 'pending'
+                else:
+                    image_status = 'failed'
+            elif review_status == '납품 완료' or review_status == '납품완료':
                 image_status = 'delivered'
             elif 저장시간 and not review_status:
                 # 작업: 저장시간이 있지만 검수 상태가 없는 것 (SKIP은 이미 제외됨)
@@ -3622,7 +3632,7 @@ def get_images_by_status():
                     '수정여부': sheet_info.get('수정여부', ''),
                     '비고': sheet_info.get('비고', '')
                 })
-            elif status == 'failed' and image_status == 'failed':
+            elif status == 'failed' and image_status in ['failed', 'pending']:
                 filtered_images.append({
                     'image_id': image_id,
                     'status': image_status,
@@ -3914,6 +3924,24 @@ def get_work_statistics():
         worker_id = request.args.get('worker_id') or WORKER_ID
         if not worker_id:
             return jsonify({'error': '작업자 ID가 필요합니다.'}), 400
+
+        # 통계 캐시 확인 (작업자별 5초 캐시)
+        global stats_cache
+        if worker_id not in stats_cache:
+            stats_cache[worker_id] = {
+                'data': None,
+                'timestamp': 0,
+                'lock': threading.Lock()
+            }
+        cache_entry = stats_cache[worker_id]
+        with cache_entry['lock']:
+            cache_age = time.time() - cache_entry.get('timestamp', 0)
+            if cache_entry.get('data') is not None and cache_age < STATS_CACHE_TTL:
+                return jsonify({
+                    'success': True,
+                    'statistics': cache_entry['data'],
+                    'cached': True
+                })
         
         sheet_data = read_from_google_sheets(worker_id)
         print(f"[DEBUG] Google Sheets에서 읽은 데이터 개수: {len(sheet_data)}")
@@ -3985,12 +4013,12 @@ def get_work_statistics():
         for image_id in sheet_data_map.keys():
             print(f"[DEBUG] 처리 중인 Image ID: {image_id}")
             sheet_info = sheet_data_map[image_id]
-            review_status = sheet_info.get('review_status', '')
+            review_status = (sheet_info.get('review_status', '') or '').strip()
             저장시간 = sheet_info.get('저장시간', '')
             skip_status_raw = sheet_info.get('skip', '')
             skip_status = skip_status_raw.strip().upper() if skip_status_raw else ''
-            revision_status = sheet_info.get('수정여부', '')
-            view = sheet_info.get('view', '')
+            revision_status = (sheet_info.get('수정여부', '') or '').strip()
+            view = (sheet_info.get('view', '') or '').strip()
             
             print(f"[DEBUG] Image ID {image_id} 상태 확인: view='{view}', review_status='{review_status}', skip_status='{skip_status}', revision_status='{revision_status}'")
             
@@ -4007,11 +4035,9 @@ def get_work_statistics():
                 stats['passed'] += 1
                 print(f"[DEBUG] 통과 카운트: Image ID {image_id}, review_status='{review_status}'")
             elif review_status == '불통':
-                # 불통: 수정완료가 아닌 불통 상태만 카운트
-                # 검수 대기(수정완료)는 별도로 계산
-                if revision_status != '수정완료' and revision_status != '수정 완료':
-                    stats['failed'] += 1
-                    print(f"[DEBUG] 불통 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
+                # 불통: 수정여부와 무관하게 불통 카운트
+                stats['failed'] += 1
+                print(f"[DEBUG] 불통 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
             elif review_status == '납품 완료' or review_status == '납품완료':
                 stats['delivered'] += 1
                 print(f"[DEBUG] 납품완료 카운트: Image ID {image_id}, review_status='{review_status}'")
@@ -4035,11 +4061,12 @@ def get_work_statistics():
                 pending_review_count += 1
                 print(f"[DEBUG] 검수대기 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
         
-        # 미작업 = 전체 이미지 - 작업 - 납품완료 - 통과 - 불통 - 검수대기 - SKIP
-        # 디버깅: 각 카운트 출력
-        print(f"[DEBUG] 통계 계산: 전체={stats['total']}, 작업={stats['working']}, 납품완료={stats['delivered']}, 통과={stats['passed']}, 불통={stats['failed']}, 검수대기={pending_review_count}, SKIP={stats['skipped']}")
-        stats['unfinished'] = stats['total'] - stats['working'] - stats['delivered'] - stats['passed'] - stats['failed'] - pending_review_count - stats['skipped']
-        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['working']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {pending_review_count} - {stats['skipped']}")
+        # 미작업 = 전체 이미지 - 작업 - 납품완료 - 통과 - 불통 - SKIP
+        # (불통-수정완료는 '검수대기'로 별도 표기하지만 미작업에서 추가 차감하지 않음)
+        stats['pending_review'] = pending_review_count
+        print(f"[DEBUG] 통계 계산: 전체={stats['total']}, 작업={stats['working']}, 납품완료={stats['delivered']}, 통과={stats['passed']}, 불통={stats['failed']}, 검수대기={stats.get('pending_review', 0)}, SKIP={stats['skipped']}")
+        stats['unfinished'] = stats['total'] - stats['working'] - stats['delivered'] - stats['passed'] - stats['failed'] - stats['skipped']
+        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['working']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {stats['skipped']}")
         if stats['unfinished'] < 0:
             stats['unfinished'] = 0  # 음수 방지
         
@@ -4047,9 +4074,15 @@ def get_work_statistics():
         completed_count = stats['passed'] + stats['failed'] + stats['delivered'] + stats['completed']
         stats['completion_rate'] = (completed_count / stats['total'] * 100) if stats['total'] > 0 else 0
         
+        # 캐시에 저장
+        with cache_entry['lock']:
+            cache_entry['data'] = stats
+            cache_entry['timestamp'] = time.time()
+        
         return jsonify({
             'success': True,
-            'statistics': stats
+            'statistics': stats,
+            'cached': False
         })
         
     except Exception as e:

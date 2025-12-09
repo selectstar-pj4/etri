@@ -2248,23 +2248,31 @@
             let failedCount = 0;
             let pendingReviewCount = 0;
             
-            // reviewStatusData에서 상태별 개수 계산
-            for (const imageId in reviewStatusData) {
-                const reviewInfo = reviewStatusData[imageId];
-                const status = reviewInfo.status;
-                const revisionStatus = reviewInfo.revision_status || '';
-                
-                if (status === '통과') {
-                    passedCount++;
-                } else if (status === '납품 완료') {
-                    completedCount++;
-                } else if (status === '불통') {
-                    // 검수 대기: 불통 상태이고 수정완료된 경우
-                    if (revisionStatus === '수정완료' || revisionStatus === '수정 완료') {
-                        pendingReviewCount++;
-                    } else {
-                        // 검수 대기가 아닌 불통 이미지만 카운트
-                        failedCount++;
+            // 서버 통계가 있으면 우선 사용, 없으면 reviewStatusData 기반으로 계산
+            if (statusStatistics) {
+                passedCount = statusStatistics.passed || 0;
+                completedCount = statusStatistics.delivered || 0;
+                failedCount = statusStatistics.failed || 0;
+                pendingReviewCount = statusStatistics.pending_review || 0;
+            } else {
+                // reviewStatusData에서 상태별 개수 계산
+                for (const imageId in reviewStatusData) {
+                    const reviewInfo = reviewStatusData[imageId];
+                    const status = reviewInfo.status;
+                    const revisionStatus = reviewInfo.revision_status || '';
+                    
+                    if (status === '통과') {
+                        passedCount++;
+                    } else if (status === '납품 완료') {
+                        completedCount++;
+                    } else if (status === '불통') {
+                        // 검수 대기: 불통 상태이고 수정완료된 경우
+                        if (revisionStatus === '수정완료' || revisionStatus === '수정 완료') {
+                            pendingReviewCount++;
+                        } else {
+                            // 검수 대기가 아닌 불통 이미지만 카운트
+                            failedCount++;
+                        }
                     }
                 }
             }
@@ -3727,8 +3735,8 @@
                 setTimeout(() => {
                     loadStatistics();
                 }, 1500);
-                // 5분마다 통계 갱신 (API 호출 최소화, 캐싱으로 실제 호출은 더 적음)
-                setInterval(loadStatistics, 300000);
+                // 통계 폴링: 8초 주기 (백엔드 5초 캐시와 병행)
+                setInterval(loadStatistics, 8000);
                 
             // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 30분(1800000ms)마다 실행
             // 작업자 ID 로드 후 약간의 지연을 두고 동기화 (구글시트 클라이언트 초기화 시간 확보)
@@ -3754,8 +3762,8 @@
             setTimeout(() => {
                 loadStatistics();
             }, 1500);
-            // 2분마다 통계 갱신 (API 호출 최소화)
-            setInterval(loadStatistics, 120000);
+            // 통계 폴링: 8초 주기 (백엔드 5초 캐시와 병행)
+            setInterval(loadStatistics, 8000);
             
             // 자동 동기화 시작: 페이지 로드 후 즉시 한 번 실행, 이후 30분(1800000ms)마다 실행
             // 작업자 ID 로드 후 약간의 지연을 두고 동기화 (구글시트 클라이언트 초기화 시간 확보)
