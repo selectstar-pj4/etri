@@ -207,8 +207,8 @@ class COCOWebAnnotator:
             base_name = output_basename
         
         # 2-hop 저장 파일명으로 변경
-        self.output_json_path_exo = os.path.join(output_dir, f'{base_name}_exo.2hop.json')
-        self.output_json_path_ego = os.path.join(output_dir, f'{base_name}_ego.2hop.json')
+        self.output_json_path_exo = os.path.join(output_dir, f'{base_name}_exo_2hop.json')
+        self.output_json_path_ego = os.path.join(output_dir, f'{base_name}_ego_2hop.json')
         
         # Initialize COCO API
         self.coco = COCO(coco_json_path)
@@ -616,16 +616,31 @@ def get_image(index):
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Failed to load image: {e}'}), 500
     # 납품완료된 이미지 개수 계산 (남은 이미지 계산을 위해)
-    # ego_images 폴더 기준으로 계산
+    # exo_images와 ego_images 폴더 모두 확인
     completed_count = 0
     passed_count = 0
-    total_ego_images = 0
+    total_all_images = 0
     remaining_count = 0
     
-    # ego_images 폴더의 실제 파일 개수 계산
+    # exo_images와 ego_images 폴더의 실제 파일 개수 계산
+    exo_images_folder_path = annotator.exo_images_folder
     ego_images_folder_path = annotator.ego_images_folder
-    print(f"[DEBUG] ego_images 폴더 경로 확인: {ego_images_folder_path}")
-    print(f"[DEBUG] ego_images 폴더 존재 여부: {os.path.exists(ego_images_folder_path)}")
+    
+    total_exo_images = 0
+    total_ego_images = 0
+    
+    if os.path.exists(exo_images_folder_path):
+        try:
+            exo_files = [f for f in os.listdir(exo_images_folder_path) 
+                         if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp'))]
+            total_exo_images = len(exo_files)
+            print(f"[DEBUG] exo_images 폴더의 이미지 개수: {total_exo_images}")
+        except Exception as e:
+            print(f"[ERROR] exo_images 폴더 읽기 실패: {e}")
+            total_exo_images = 0
+    else:
+        print(f"[DEBUG] exo_images 폴더 경로 확인: {exo_images_folder_path}")
+        print(f"[DEBUG] exo_images 폴더 존재 여부: {os.path.exists(exo_images_folder_path)}")
     
     if os.path.exists(ego_images_folder_path):
         try:
@@ -637,8 +652,11 @@ def get_image(index):
             print(f"[ERROR] ego_images 폴더 읽기 실패: {e}")
             total_ego_images = 0
     else:
-        print(f"[WARN] ego_images 폴더를 찾을 수 없습니다: {ego_images_folder_path}")
-        total_ego_images = 0
+        print(f"[DEBUG] ego_images 폴더 경로 확인: {ego_images_folder_path}")
+        print(f"[DEBUG] ego_images 폴더 존재 여부: {os.path.exists(ego_images_folder_path)}")
+    
+    # 전체 이미지 개수 = exo + ego (중복 제거는 하지 않음, 각 폴더의 파일 개수 합산)
+    total_all_images = total_exo_images + total_ego_images
     
     if google_sheets_client and worker_id:
         try:
@@ -646,62 +664,61 @@ def get_image(index):
             print(f"[DEBUG] 구글시트에서 읽은 전체 이미지 개수: {len(sheet_data)}")
             
             if len(sheet_data) > 0:
-                # 구글시트에서 view가 'ego'인 이미지만 필터링
-                ego_sheet_images = 0
+                # 구글시트에서 모든 이미지 확인 (view 필터링 없음)
+                all_sheet_images = 0
                 for row in sheet_data:
                     row_image_id = row.get('Image ID', '') or row.get('image_id', '')
-                    row_view = row.get('view', '') or row.get('View', '')
                     
-                    # view가 'ego'인 이미지만 처리
-                    if row_image_id and row_view.lower() == 'ego':
-                        ego_sheet_images += 1
+                    # 모든 이미지 처리 (view 필터링 없음)
+                    if row_image_id:
+                        all_sheet_images += 1
                         review_status = row.get('검수', '') or row.get('검수 상태', '')
                         if review_status == '납품 완료':
                             completed_count += 1
                         elif review_status == '통과':
                             passed_count += 1
                 
-                # ego_images 폴더 개수와 구글시트의 ego 이미지 개수 중 큰 값 사용
-                if total_ego_images > 0:
-                    # 남은 이미지 개수 = ego_images 폴더 이미지 - 통과 - 납품완료
-                    remaining_count = total_ego_images - passed_count - completed_count
+                # 전체 이미지 폴더 개수와 구글시트의 이미지 개수 중 큰 값 사용
+                if total_all_images > 0:
+                    # 남은 이미지 개수 = 전체 폴더 이미지 - 통과 - 납품완료
+                    remaining_count = total_all_images - passed_count - completed_count
                 else:
-                    # 폴더 개수를 알 수 없으면 구글시트의 ego 이미지 개수 사용
-                    remaining_count = ego_sheet_images - passed_count - completed_count
+                    # 폴더 개수를 알 수 없으면 구글시트의 이미지 개수 사용
+                    remaining_count = all_sheet_images - passed_count - completed_count
                 
                 if remaining_count < 0:
                     remaining_count = 0
                 
-                print(f"[DEBUG] 남은 이미지 계산: ego폴더={total_ego_images}, 구글시트ego={ego_sheet_images}, 통과={passed_count}, 납품완료={completed_count}, 남은={remaining_count}")
+                print(f"[DEBUG] 남은 이미지 계산: 전체폴더={total_all_images}(exo={total_exo_images}, ego={total_ego_images}), 구글시트={all_sheet_images}, 통과={passed_count}, 납품완료={completed_count}, 남은={remaining_count}")
             else:
-                # 구글시트 데이터가 없으면 ego_images 폴더 개수 사용
-                if total_ego_images > 0:
-                    remaining_count = total_ego_images
-                    print(f"[INFO] 구글시트 데이터가 없습니다. ego_images 폴더 개수 사용: {remaining_count}")
+                # 구글시트 데이터가 없으면 전체 이미지 폴더 개수 사용
+                if total_all_images > 0:
+                    remaining_count = total_all_images
+                    print(f"[INFO] 구글시트 데이터가 없습니다. 전체 이미지 폴더 개수 사용: {remaining_count}")
                 else:
-                    print(f"[WARN] 구글시트 데이터도 없고 ego_images 폴더도 찾을 수 없습니다.")
+                    print(f"[WARN] 구글시트 데이터도 없고 이미지 폴더도 찾을 수 없습니다.")
         except Exception as e:
             # 429 에러는 조용히 처리 (로그 최소화)
             if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 429:
                 pass  # 429 에러는 로그 출력하지 않음
             else:
                 print(f"[WARN] 납품완료/통과 개수 계산 중 오류: {e}")
-            # 에러 발생 시 ego_images 폴더 개수 사용
-            if total_ego_images > 0:
-                remaining_count = total_ego_images
+            # 에러 발생 시 전체 이미지 폴더 개수 사용
+            if total_all_images > 0:
+                remaining_count = total_all_images
     else:
-        # 구글시트 클라이언트가 없으면 ego_images 폴더 개수 사용
-        if total_ego_images > 0:
-            remaining_count = total_ego_images
-            print(f"[INFO] 구글시트 클라이언트가 없습니다. ego_images 폴더 개수 사용: {remaining_count}")
+        # 구글시트 클라이언트가 없으면 전체 이미지 폴더 개수 사용
+        if total_all_images > 0:
+            remaining_count = total_all_images
+            print(f"[INFO] 구글시트 클라이언트가 없습니다. 전체 이미지 폴더 개수 사용: {remaining_count}")
         else:
-            print(f"[WARN] 구글시트 클라이언트도 없고 ego_images 폴더도 찾을 수 없습니다.")
+            print(f"[WARN] 구글시트 클라이언트도 없고 이미지 폴더도 찾을 수 없습니다.")
     
     # 최종 검증: remaining_count가 비정상적으로 크면 0으로 설정
     if remaining_count > 100000:
-        print(f"[WARN] 남은 이미지 개수가 비정상적으로 큽니다: {remaining_count}, ego_images 폴더 개수로 재계산합니다.")
-        if total_ego_images > 0:
-            remaining_count = total_ego_images
+        print(f"[WARN] 남은 이미지 개수가 비정상적으로 큽니다: {remaining_count}, 전체 이미지 폴더 개수로 재계산합니다.")
+        if total_all_images > 0:
+            remaining_count = total_all_images
         else:
             remaining_count = 0
     
@@ -750,12 +767,19 @@ def translate_question():
         # view_type에 따라 다른 프롬프트 사용
         if view_type == 'ego':
             # ego_data_sample.json 형식 참고
-            prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format for EGO-CENTRIC questions:
+            prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format for EGO-CENTRIC questions.
 
-CORRECT FORMAT FOR EGO-CENTRIC QUESTIONS (2-hop: EXACTLY TWO TAGS):
-[Question with EXACTLY TWO tags chosen only from these pairs: (POS+REL), (ATT+REL), (POS+ATT)] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer. 🚨 NEVER include the third tag.
+═══════════════════════════════════════════════════════════════════════════════
+📋 TRANSLATION RULES - EGO-CENTRIC QUESTIONS (2-hop)
+═══════════════════════════════════════════════════════════════════════════════
 
-CRITICAL - EGO-CENTRIC QUESTION STARTING PHRASES:
+**FORMAT**: [Question with EXACTLY TWO tags from: (POS+REL), (ATT+REL), (POS+ATT)] <choice>(a) option1, (b) option2, (c) option3, (d) option4</choice> And provide the bounding box coordinate of the region related to your answer.
+
+🚨 CRITICAL: NEVER include the third tag. Use EXACTLY TWO tags only.
+
+═══════════════════════════════════════════════════════════════════════════════
+STEP 1: EGO-CENTRIC QUESTION STARTING PHRASES
+═══════════════════════════════════════════════════════════════════════════════
 1. If the Korean question contains "~관점에서" (from the perspective of ~):
    → Translate to: "From the perspective of [person/object], ..."
    Example: "작은 소녀의 관점에서" → "From the perspective of the little girl, ..."
@@ -788,40 +812,69 @@ CRITICAL TAG USAGE RULES (2-hop):
    - Examples: "round object", "green object", "white object", "rectangular object", "party item", "furry creature"
    - Use for describing WHAT object/group is being asked about
    
-🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
-   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
-   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
-   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
-   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
-   - WRONG: "which white object" (missing <ATT> tag)
+🚨 CRITICAL - <ATT> TAG USAGE RULES:
+   - ✅ **USE <ATT> TAG**: When Korean question contains objects WITH modifiers (수식어가 붙은 객체)
+     * "흰색 객체" (white object) → "<ATT>white object</ATT>"
+     * "빨간색 객체" (red object) → "<ATT>red object</ATT>"
+     * "원형 객체" (round object) → "<ATT>round object</ATT>"
+     * "정사각형 객체" (square object) → "<ATT>square object</ATT>"
+     * "식용 가능한 물체" (edible item) → "<ATT>edible item</ATT>"
+     * "밝은 색상의 객체" (bright colored object) → "<ATT>bright colored object</ATT>"
+   - ❌ **DO NOT USE <ATT> TAG**: When Korean question contains plain "객체" (object), "물체" (item) WITHOUT modifiers
+     * "객체" (object) → just "object" (NO <ATT> tag)
+     * "물체" (item) → just "item" (NO <ATT> tag)
+   - WRONG: "which <ATT>object</ATT>" (plain object without modifier)
+   - CORRECT: "which object" (no ATT tag for plain object)
+   - WRONG: "which white object" (missing <ATT> tag for object with modifier)
    - CORRECT: "which <ATT>white object</ATT>"
-   - WRONG: "which person" (missing <ATT> tag)
-   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
 
-Reference examples from ego_data_sample.json:
+Reference examples from ego_data_sample.json (2-hop format, two tags only):
 
-Example 1: "From the perspective of the little girl standing in front of the man, which <ATT>party item</ATT> is <REL>farthest</REL> and located <POS>to the right</POS> of her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 1 (ATT+REL): "From the perspective of the little girl, which <ATT>party item</ATT> is <REL>farthest</REL> from her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 2: "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> on the <POS>right side of the room</POS> is <REL>farthest from me</REL>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 2 (POS+ATT): "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> is <POS>on the right side of the room</POS>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 3: "From the perspective of the woman, which <ATT>silver object</ATT> <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 3 (POS+REL): "From the perspective of the woman, which object <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer."
 
 Korean question: {question_ko}
 
-Translate to English following the EXACT format above. Make sure:
-- Use "From the perspective of ~" if Korean contains "~관점에서"
-- Use "When I'm ~" if Korean contains "내가" or "I'm"
-- <REL> is used ONLY for relationship terms (farthest, closest, etc.)
-- <POS> is used ONLY for position/location information from the person's perspective (on the left side, on the right side, etc.)
-- <ATT> is used ONLY for attributes or target groups (round object, green object, white object, person, etc.)
-- 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (POS+REL), (ATT+REL), (POS+ATT). Do NOT add the third tag.
-- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
-- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
-- 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
-- All tags have meaningful content inside them
-- <choice> tag comes before "And provide..." phrase
-- DO NOT use generic phrases like "in the image" for <POS> tag
-- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags and that ONLY TWO TAGS are used from the allowed pairs."""
+═══════════════════════════════════════════════════════════════════════════════
+STEP 4: TRANSLATION VERIFICATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+**BEFORE FINALIZING, VERIFY EACH STEP**:
+
+1. **TAG COUNT VERIFICATION** (MOST IMPORTANT):
+   [ ] Count <ATT> tags → Must be 0 or 1
+   [ ] Count <POS> tags → Must be 0 or 1
+   [ ] Count <REL> tags → Must be 0 or 1
+   [ ] Total tag count → Must be EXACTLY 2
+   [ ] Tag pair is in allowed list: (POS+REL), (ATT+REL), (POS+ATT)
+
+2. **ATT TAG DECISION VERIFICATION**:
+   [ ] Does Korean contain "객체" or "물체"?
+      → If NO: No ATT tag needed
+      → If YES: Check step 3
+   [ ] Is there a modifier BEFORE "객체/물체"?
+      → Examples: "빨간색", "원형", "나무", "식용 가능한"
+      → If YES: MUST use <ATT> tag
+      → If NO: DO NOT use <ATT> tag
+
+3. **TRANSLATION QUALITY**:
+   [ ] Use "From the perspective of ~" if Korean contains "~관점에서"
+   [ ] Use "When I'm ~" if Korean contains "내가" or "I'm"
+   [ ] <choice> tag comes before "And provide..." phrase
+   [ ] All tags have meaningful content inside them
+
+**FINAL CHECK**:
+- ✅ EXACTLY 2 tags used (no more, no less)
+- ✅ ATT tag used ONLY for objects WITH modifiers
+- ✅ ATT tag NOT used for plain "객체" or "물체"
+- ✅ Tag pair matches allowed combinations
+
+Korean question: {question_ko}
+
+Translate to English following the EXACT format and verification checklist above."""
         else:
             # exo_data_sample.json 형식 참고
             prompt = f"""Translate the following Korean question to English. You MUST follow this EXACT format:
@@ -849,34 +902,64 @@ CRITICAL TAG USAGE RULES (2-hop):
    - Examples: "red object", "square-shaped item", "among the items", "among the visible people", "edible food item", "white object", "round object"
    - Use for describing WHAT object/group is being asked about
    
-🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
-   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
-   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
-   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
-   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
-   - WRONG: "which white object" (missing <ATT> tag)
+🚨 CRITICAL - <ATT> TAG USAGE RULES:
+   - ✅ **USE <ATT> TAG**: When Korean question contains objects WITH modifiers (수식어가 붙은 객체)
+     * "흰색 객체" (white object) → "<ATT>white object</ATT>"
+     * "빨간색 객체" (red object) → "<ATT>red object</ATT>"
+     * "원형 객체" (round object) → "<ATT>round object</ATT>"
+     * "정사각형 객체" (square object) → "<ATT>square object</ATT>"
+     * "식용 가능한 물체" (edible item) → "<ATT>edible item</ATT>"
+     * "밝은 색상의 객체" (bright colored object) → "<ATT>bright colored object</ATT>"
+   - ❌ **DO NOT USE <ATT> TAG**: When Korean question contains plain "객체" (object), "물체" (item) WITHOUT modifiers
+     * "객체" (object) → just "object" (NO <ATT> tag)
+     * "물체" (item) → just "item" (NO <ATT> tag)
+   - WRONG: "which <ATT>object</ATT>" (plain object without modifier)
+   - CORRECT: "which object" (no ATT tag for plain object)
+   - WRONG: "which white object" (missing <ATT> tag for object with modifier)
    - CORRECT: "which <ATT>white object</ATT>"
-   - WRONG: "which person" (missing <ATT> tag)
-   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
 
-Reference examples from exo_data_sample.json:
-- "<REL>Second-closest</REL> to the refrigerator a countertop located <POS>in the center</POS> of the image, which object is it <ATT>among the items</ATT>? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
-- "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
+Reference examples from exo_data_sample.json (2-hop format, two tags only):
+- Example 1 (POS+REL): "Which object <POS>in the center</POS> of the countertop is <REL>second-closest</REL> to the refrigerator? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
+- Example 2 (ATT+REL): "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL>? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
 
 Korean question: {question_ko}
 
-Translate to English following the EXACT format above. Make sure:
-- <REL> is used ONLY for relationship terms (farthest, closest, etc.)
-- <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
-- <ATT> is used ONLY for attributes or target groups (red object, white object, among the items, person, etc.)
-- 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (ATT+REL), (POS+REL), (POS+ATT). Do NOT add the third tag.
-- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
-- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
-- 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
-- All tags have meaningful content inside them
-- <choice> tag comes before "And provide..." phrase
-- DO NOT use generic phrases like "in the image" for <POS> tag
-- DOUBLE-CHECK: Before finalizing, verify that ALL attribute descriptions are wrapped in <ATT> tags and that ONLY TWO TAGS are used from the allowed pairs."""
+═══════════════════════════════════════════════════════════════════════════════
+STEP 4: TRANSLATION VERIFICATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+**BEFORE FINALIZING, VERIFY EACH STEP**:
+
+1. **TAG COUNT VERIFICATION** (MOST IMPORTANT):
+   [ ] Count <ATT> tags → Must be 0 or 1
+   [ ] Count <POS> tags → Must be 0 or 1
+   [ ] Count <REL> tags → Must be 0 or 1
+   [ ] Total tag count → Must be EXACTLY 2
+   [ ] Tag pair is in allowed list: (ATT+REL), (POS+REL), (POS+ATT)
+
+2. **ATT TAG DECISION VERIFICATION**:
+   [ ] Does Korean contain "객체" or "물체"?
+      → If NO: No ATT tag needed
+      → If YES: Check step 3
+   [ ] Is there a modifier BEFORE "객체/물체"?
+      → Examples: "빨간색", "원형", "나무", "식용 가능한"
+      → If YES: MUST use <ATT> tag
+      → If NO: DO NOT use <ATT> tag
+
+3. **TRANSLATION QUALITY**:
+   [ ] <choice> tag comes before "And provide..." phrase
+   [ ] All tags have meaningful content inside them
+   [ ] DO NOT use generic phrases like "in the image" for <POS> tag
+
+**FINAL CHECK**:
+- ✅ EXACTLY 2 tags used (no more, no less)
+- ✅ ATT tag used ONLY for objects WITH modifiers
+- ✅ ATT tag NOT used for plain "객체" or "물체"
+- ✅ Tag pair matches allowed combinations
+
+Korean question: {question_ko}
+
+Translate to English following the EXACT format and verification checklist above."""
         
         # view_type에 따라 다른 시스템 메시지 사용
         if view_type == 'ego':
@@ -899,13 +982,32 @@ Translate to English following the EXACT format above. Make sure:
         if '<ATT>' not in translated_question and '<POS>' not in translated_question and '<REL>' not in translated_question:
             return jsonify({'success': False, 'error': 'Translation must include at least one of <ATT>, <POS>, or <REL> tags'}), 400
         
-        # ATT 태그 누락 검증 강화: 한국어 질문에 속성 단어가 있는데 ATT 태그가 없는 경우
-        attribute_keywords_ko = ['흰색', '빨간색', '파란색', '초록색', '검은색', '노란색', '원형', '정사각형', '직사각형', '사람', '객체', '물체', '색', '모양', '재질']
-        question_has_attribute = any(keyword in question_ko for keyword in attribute_keywords_ko)
-        if question_has_attribute and '<ATT>' not in translated_question:
+        # ATT 태그 누락 검증: 질문에서 찾는 대상(객체)에 속성이 있는지 확인
+        # 단순히 키워드가 있는지만 확인하는 것이 아니라, 질문의 끝 부분(찾는 대상)에 수식어가 있는지 확인
+        # 예: "파란색 청바지를 입은 사람 오른쪽에 있는 가장 높은 객체" → "가장 높은 객체"가 찾는 대상이므로 ATT 필요 없음
+        # 예: "파란색 청바지를 입은 사람 오른쪽에 있는 빨간색 객체" → "빨간색 객체"가 찾는 대상이므로 ATT 필요
+        
+        # 질문 끝 부분에서 "~객체", "~물체" 패턴 찾기
+        object_pattern = r'([가-힣\s]+(?:객체|물체|항목))'
+        matches = re.findall(object_pattern, question_ko)
+        
+        # 질문 끝 부분의 객체 표현 확인
+        question_has_target_attribute = False
+        if matches:
+            # 마지막 매치(질문의 끝 부분) 확인
+            last_object_phrase = matches[-1].strip()
+            # 수식어가 있는지 확인 (색상, 형태, 재질 등)
+            attribute_modifiers = ['흰색', '빨간색', '파란색', '초록색', '검은색', '노란색', '원형', '정사각형', '직사각형', '사각형', '밝은', '어두운', '나무', '금속', '식용', '밝은 색상', '어두운 색상']
+            for modifier in attribute_modifiers:
+                if modifier in last_object_phrase and ('객체' in last_object_phrase or '물체' in last_object_phrase or '항목' in last_object_phrase):
+                    question_has_target_attribute = True
+                    break
+        
+        # 질문에서 찾는 대상에 속성이 있는데 ATT 태그가 없는 경우에만 에러
+        if question_has_target_attribute and '<ATT>' not in translated_question:
             return jsonify({
                 'success': False, 
-                'error': f'ATT tag is missing! Korean question contains attribute words but translation lacks <ATT> tag. Please ensure all attribute descriptions are wrapped in <ATT> tags. Translation: {translated_question[:200]}...'
+                'error': f'ATT tag is missing! Korean question contains attribute words in the target object phrase ("{last_object_phrase}") but translation lacks <ATT> tag. Please ensure all attribute descriptions for the target object are wrapped in <ATT> tags. Translation: {translated_question[:200]}...'
             }), 400
         
         if '<choice>' not in translated_question:
@@ -1255,224 +1357,294 @@ def generate_question_and_choices():
         client = OpenAI(api_key=OPENAI_API_KEY)
         
         # 2-hop 질문 생성: ATT, POS, REL 중 정확히 두 가지 태그만 사용 (view_type별 허용 조합은 allowed_tag_pairs 참고)
-        question_generation_prompt = f"""이미지와 이미지 분석 결과를 바탕으로 VQA (Visual Question Answering) 2-hop 질문을 한글로 생성해주세요.
-현재 뷰 타입: {view_type} / 허용 태그 조합: {allowed_tag_pairs}
+        question_generation_prompt = f"""Generate VQA (Visual Question Answering) 2-hop questions in Korean based on the image and image analysis results.
 
-🚨 **절대 필수 규칙 - 반드시 준수해야 함**:
+⚠️ IMPORTANT: You must generate questions in KOREAN language, but follow all rules and guidelines below.
 
-**STEP 1: 이미지 내용 직접 확인 및 ATT 속성 검증 (절대 필수)**
+═══════════════════════════════════════════════════════════════════════════════
+📋 CURRENT SETTINGS
+═══════════════════════════════════════════════════════════════════════════════
+- View type: {view_type}
+- Allowed tag combinations: {allowed_tag_pairs}
+- Each tag type must be used EXACTLY ONCE (ATT 1, POS 1, REL 1 - choose 2 out of 3)
+- Total tag count: EXACTLY 2 tags
 
-먼저 이미지를 직접 확인하고, 질문에 사용할 ATT 속성이 실제 이미지의 객체와 정확히 일치하는지 검증하세요.
+═══════════════════════════════════════════════════════════════════════════════
+🚨 ABSOLUTE MANDATORY RULES - MUST FOLLOW
+═══════════════════════════════════════════════════════════════════════════════
 
-🚨 **CRITICAL - ATT 속성 정확성 검증 (절대 필수)**:
-1. 질문에서 사용할 ATT 속성(예: "빨간색 객체", "원형 또는 원통형 객체", "식용 가능한 물체")을 먼저 결정하세요.
-2. 이미지를 직접 확인하여 해당 ATT 속성을 만족하는 객체들이 실제로 존재하는지 확인하세요.
-3. 예를 들어, "흰색 객체"라고 질문하려면 이미지에 실제로 흰색 객체가 있어야 합니다.
-4. 예를 들어, "정사각형 또는 직사각형 객체"라고 질문하려면 이미지에 실제로 정사각형 또는 직사각형 객체가 있어야 합니다.
-5. 이미지에 존재하지 않는 속성을 ATT로 사용하는 것은 절대 금지입니다.
+**STEP 1: Verify Image Content and ATT Attribute Accuracy (MANDATORY)**
 
-**검증 체크리스트**:
-- [ ] 질문에서 사용할 ATT 속성이 실제 이미지의 객체와 정확히 일치하는가?
-- [ ] ATT 속성을 만족하는 객체가 이미지에 실제로 존재하는가?
-- [ ] 이미지에 존재하지 않는 속성을 ATT로 사용하지 않았는가?
+First, directly examine the image and verify that the ATT attributes you plan to use in the question exactly match the actual objects in the image.
 
-**STEP 2: 복잡하고 고급 추론이 필요한 2-hop 질문 구조 생성**
+🚨 **CRITICAL - ATT Attribute Accuracy Verification (MANDATORY)**:
+1. First decide on the ATT attribute you will use in the question (e.g., "빨간색 객체" (red object), "원형 또는 원통형 객체" (round or cylindrical object), "식용 가능한 물체" (edible item)).
+2. Directly examine the image to confirm that objects satisfying this ATT attribute actually exist.
+3. For example, if you want to ask about "흰색 객체" (white object), there must actually be white objects in the image.
+4. For example, if you want to ask about "정사각형 또는 직사각형 객체" (square or rectangular object), there must actually be square or rectangular objects in the image.
+5. It is ABSOLUTELY FORBIDDEN to use ATT attributes that do not exist in the image.
 
-🚨 **CRITICAL - 질문 복잡도 및 고급 추론 요구사항 (절대 필수)**:
+**Verification Checklist**:
+- [ ] Does the ATT attribute you plan to use exactly match the actual objects in the image?
+- [ ] Do objects satisfying the ATT attribute actually exist in the image?
+- [ ] Are you NOT using ATT attributes that do not exist in the image?
 
-각 질문은 ATT, POS, REL 중 **정확히 두 가지 태그만** 사용해야 합니다. 허용 조합은 {allowed_tag_pairs}이며, 세 번째 태그를 절대 포함하지 마세요. **단순한 질문은 절대 금지**입니다.
+═══════════════════════════════════════════════════════════════════════════════
+STEP 2: Generate 2-hop Question Structure (Tag Usage Rules)
+═══════════════════════════════════════════════════════════════════════════════
 
-**❌ 절대 금지 - 너무 단순한 질문 패턴**:
-- "X 오른쪽에 있는 가장 가까운 Y 객체" (단순 위치+속성 조합)
-- "X 위에 있는 가장 가까운 Y 객체" (단순 위치+속성 조합)
-- "X 왼쪽에 있는 가장 먼 Y 객체" (단순 위치+속성 조합)
+🚨 **CRITICAL - 2-hop Tag Usage Rules (ABSOLUTE MANDATORY, MUST FOLLOW)**:
 
-**✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문 패턴 (2-hop, 두 태그만 사용)**:
+**RULE 1: Tag Count Limitation**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ **Use EXACTLY 2 tags only** (choose 2 out of ATT, POS, REL)
+✅ **Each tag type must be used EXACTLY ONCE** (ATT 1, POS 1, REL 1 - choose 2)
+❌ **ABSOLUTELY FORBIDDEN**: Use all 3 tags (ATT + POS + REL)
+❌ **ABSOLUTELY FORBIDDEN**: Use same tag type 2 or more times (ATT 2, POS 2, etc.)
 
-1. **ATT+REL 조합** (ATT와 거리/순서 관계만, POS 금지):
+**Allowed Combinations (Current view type: {view_type})**:
+{allowed_tag_pairs}
+
+**Verification Method**:
+1. Count <ATT> tags in your question → Must be exactly 0 or 1
+2. Count <POS> tags in your question → Must be exactly 0 or 1
+3. Count <REL> tags in your question → Must be exactly 0 or 1
+4. Count total tags → Must be exactly 2
+5. Check if used tag combination is included in {allowed_tag_pairs}
+
+**❌ ABSOLUTELY FORBIDDEN - Too Simple Question Patterns**:
+- "X 오른쪽에 있는 가장 가까운 Y 객체" (simple position+attribute combination)
+- "X 위에 있는 가장 가까운 Y 객체" (simple position+attribute combination)
+- "X 왼쪽에 있는 가장 먼 Y 객체" (simple position+attribute combination)
+
+**✅ MUST USE - Complex Advanced Reasoning Question Patterns (2-hop, two tags only)**:
+
+1. **ATT+REL Combination** (ATT and distance/order relationship only, POS forbidden):
    - "<ATT>정사각형 또는 직사각형 객체</ATT> 중에서 포크로부터 <REL>가장 먼</REL> 객체"
    - "<ATT>파티용품 객체</ATT> 중에서 사람과의 <REL>두 번째로 가까운</REL> 객체"
 
-2. **POS+REL 조합** (위치와 관계만, ATT 금지):
+2. **POS+REL Combination** (position and relationship only, ATT forbidden):
    - "테이블 <POS>왼쪽에 있는</POS> 물체들 중 <REL>가장 가까운</REL> 객체"
    - "싱크대 <POS>앞에 있는</POS> 물체들 중 <REL>두 번째로 먼</REL> 객체"
 
-3. **POS+ATT 조합** (위치와 속성만, REL 금지):
+3. **POS+ATT Combination** (position and attribute only, REL forbidden):
    - "소파 <POS>오른쪽에 위치한</POS> <ATT>밝은 색상의 객체</ATT>"
    - "전자레인지 <POS>위에 있는</POS> <ATT>원형 또는 원통형 객체</ATT>"
 
-**ATT (속성/대상) 규칙 - CRITICAL: 속성 기반 표현만 사용, 구체적 명사 금지**:
-- ❌ **절대 사용 금지 - 구체적 명사**: "컵", "접시", "의자", "테이블" 등
-- ✅ **반드시 사용 - 속성 기반 표현**:
-  * "원형 또는 원통형 객체" (컵, 병 등)
-  * "밝은 색상의 객체" (밝은 색의 물체들)
-  * "파티용품 객체" (파티 관련 물체들)
-  * "식용 가능한 물체" (먹을 수 있는 것들)
-  * "정사각형 또는 직사각형 객체" (사각형 모양)
-  * "빨간색 객체", "흰색 색상의 객체" (색상 기반)
-  * "나무 재질의 객체" (재질 기반)
+**RULE 2: ATT Tag Usage Decision Criteria**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**POS (위치) 규칙**:
-- ❌ 절대 사용 금지: "이미지 중앙에", "이미지 왼쪽에" (모호함)
-- ✅ 반드시 사용: "테이블 중앙에", "소파 왼쪽에", "싱크대 오른쪽에" (구체적 객체 기준)
-- **위치 반전 규칙**: 실제로 "왼쪽"에 있으면 질문에서는 "오른쪽"으로 표현
+**How to Decide Whether to Use ATT Tag**:
 
-**REL (관계) 규칙**:
-- "가장 가까운", "가장 먼", "두 번째로 가까운", "가장 높은", "가장 낮은", "더 높은", "더 낮은", "더 가까운", "더 먼" 등
+1️⃣ **Is there a modifier BEFORE "객체" (object), "물체" (item), or "항목" (item)?**
+   - Modifier examples: color("빨간색" red, "흰색" white), shape("원형" round, "사각형" square), material("나무" wood, "금속" metal), function("식용 가능한" edible), other attributes("밝은 색상의" bright colored, "파티용품" party item)
 
-**🚨 CRITICAL - 질문 끝 표현 규칙 (절대 필수)**:
-질문은 반드시 "~객체"로 끝나야 합니다. "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요.
+2️⃣ **Decision Criteria**:
+   ✅ **USE ATT TAG**: modifier + "객체/물체/항목" form
+      Example: "빨간색 객체" → <ATT>빨간색 객체</ATT>
+      Example: "원형 또는 원통형 객체" → <ATT>원형 또는 원통형 객체</ATT>
+      Example: "식용 가능한 물체" → <ATT>식용 가능한 물체</ATT>
+   
+   ❌ **DO NOT USE ATT TAG**: plain "객체", "물체", "항목" (no modifier)
+      Example: "객체" → just "객체" (NO ATT tag)
+      Example: "물체" → just "물체" (NO ATT tag)
 
-- ❌ **절대 사용 금지**:
-  * "~사람은 누구인가요?" (사람을 묻는 형식 금지)
-  * "것은 무엇인가요?" (모호한 표현 금지)
-  * "가장 가까운 것은?" (ATT 속성 미명시)
-  * "가장 먼 것은?" (ATT 속성 미명시)
-  * "~객체는?" ("는?" 사용 금지)
-  * "~객체는 무엇인가요?" ("는 무엇인가요?" 사용 금지)
-  * "무엇인가요?" (ATT 속성이 명시되지 않은 형식 금지)
+3️⃣ **Concrete nouns are ABSOLUTELY FORBIDDEN**:
+   ❌ "컵" (cup), "접시" (plate), "의자" (chair), "테이블" (table), etc. → Instead use attribute-based expressions like "원형 객체" (round object), "사각형 객체" (square object), etc.
 
-- ✅ **반드시 사용 - "~객체"로 끝나는 형식**:
-  * "정사각형 또는 직사각형의 객체"
-  * "원통형 또는 원형의 객체"
-  * "밝은 색상의 객체"
-  * "무채색 객체"
-  * "금속 재질의 객체"
-  * "식용 가능한 객체"
-  * "빨간색 객체"
-  * "나무 재질의 객체"
+**ATT Tag Usage Examples**:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ USE: "빨간색 객체" → <ATT>빨간색 객체</ATT>
+✅ USE: "원형 또는 원통형 객체" → <ATT>원형 또는 원통형 객체</ATT>
+✅ USE: "밝은 색상의 객체" → <ATT>밝은 색상의 객체</ATT>
+✅ USE: "식용 가능한 물체" → <ATT>식용 가능한 물체</ATT>
+✅ USE: "정사각형 또는 직사각형 객체" → <ATT>정사각형 또는 직사각형 객체</ATT>
+✅ USE: "나무 재질의 객체" → <ATT>나무 재질의 객체</ATT>
+❌ DO NOT USE: "객체" → just "객체" (NO ATT tag)
+❌ DO NOT USE: "물체" → just "물체" (NO ATT tag)
 
-**질문 형식 예시**:
-- ✅ 올바른 예시: "테이블 위에 있는 가장 가까운 원형 또는 원통형의 객체"
-- ✅ 올바른 예시: "소파 왼쪽에 위치한 밝은 색상의 객체"
-- ✅ 올바른 예시: "싱크대 오른쪽에 있는 무채색 객체"
-- ✅ 올바른 예시: "식용 가능한 객체 중에서 포크로부터 가장 먼 객체"
-- ❌ 잘못된 예시: "소파 왼쪽에 있는 사람은 누구인가요?" (사람을 묻는 형식, "는?" 사용)
-- ❌ 잘못된 예시: "테이블 위에 있는 것은 무엇인가요?" (ATT 속성 미명시, "는 무엇인가요?" 사용)
-- ❌ 잘못된 예시: "가장 가까운 것은?" (ATT 속성 미명시, "는?" 사용)
-- ❌ 잘못된 예시: "가장 가까운 객체는?" ("는?" 사용 금지)
-- ❌ 잘못된 예시: "가장 가까운 객체는 무엇인가요?" ("는 무엇인가요?" 사용 금지)
+**RULE 3: POS Tag Usage Rules**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ **USE**: Specific object-based position expressions
+   - "테이블 중앙에" (center of table) → <POS>테이블 중앙에</POS>
+   - "소파 왼쪽에" (left side of sofa) → <POS>소파 왼쪽에</POS>
+   - "싱크대 오른쪽에" (right side of sink) → <POS>싱크대 오른쪽에</POS>
+   - "의자 앞에" (in front of chair) → <POS>의자 앞에</POS>
+   - "창문 옆에" (next to window) → <POS>창문 옆에</POS>
 
-**중요**: 질문은 반드시 ATT 속성을 포함한 "~객체"로 끝나야 하며, "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요. 질문은 "~객체"로 끝나는 명사구 형태여야 합니다.
+❌ **ABSOLUTELY FORBIDDEN**: Ambiguous position expressions
+   - "이미지 중앙에" (center of image - ambiguous)
+   - "이미지 왼쪽에" (left side of image - ambiguous)
+   - "화면 위에" (top of screen - ambiguous)
 
-**STEP 3: 소거법을 위한 선택지 설계 및 검증 (고급 추론 능력 요구)**
+⚠️ **Position Reversal Rule**: If something is actually on the "왼쪽" (left), express it as "오른쪽" (right) in the question
 
-🚨 **CRITICAL - 고급 추론 능력 요구를 위한 선택지 구성 (절대 필수)**:
-- 질문의 ATT 조건을 만족하는 객체가 선택지에 **최소 2개 이상** 있어야 합니다.
-- 이렇게 해야 다른 AI가 문제를 풀 때 단순히 ATT 조건을 만족하는지 확인하는 것만으로는 정답을 찾을 수 없고, 추가적인 추론(위치, 거리 등)이 필요합니다.
+**RULE 4: REL Tag Usage Rules**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ **USE**: Relationship expressions for distance, order, height, etc.
+   - "가장 가까운" (closest) → <REL>가장 가까운</REL>
+   - "가장 먼" (farthest) → <REL>가장 먼</REL>
+   - "두 번째로 가까운" (second-closest) → <REL>두 번째로 가까운</REL>
+   - "가장 높은" (highest) → <REL>가장 높은</REL>
+   - "가장 낮은" (lowest) → <REL>가장 낮은</REL>
+   - "더 가까운" (closer) → <REL>더 가까운</REL>
+   - "더 먼" (farther) → <REL>더 먼</REL>
 
-**예시 1 - 올바른 구성 (고급 추론 요구)**:
-질문: "식용 가능한 물체 중에서..."
-선택지:
-- a: 케이크 조각 (ATT 조건 만족, 하지만 다른 조건 불만족)
-- b: 케이크 조각 (ATT 조건 만족, 하지만 다른 조건 불만족) ← 다른 케이크 조각
-- c: 피자 (ATT 조건 만족, 하지만 다른 조건 불만족)
-- d: 햄버거 (정답: ATT 조건 만족 + 다른 모든 조건 만족)
+**🚨 CRITICAL - Question Ending Format Rule (ABSOLUTE MANDATORY)**:
+Questions MUST end with "~객체" (object). NEVER use interrogative forms like "는?" (is?) or "는 무엇인가요?" (what is?).
 
-이 경우 ATT 조건을 만족하는 객체가 4개(a, b, c, d 모두)이므로 고급 추론이 필요합니다.
+- ❌ **ABSOLUTELY FORBIDDEN**:
+  * "~사람은 누구인가요?" (asking about person - forbidden)
+  * "것은 무엇인가요?" (ambiguous expression - forbidden)
+  * "가장 가까운 것은?" (ATT attribute not specified - forbidden)
+  * "가장 먼 것은?" (ATT attribute not specified - forbidden)
+  * "~객체는?" ("는?" usage forbidden)
+  * "~객체는 무엇인가요?" ("는 무엇인가요?" usage forbidden)
+  * "무엇인가요?" (ATT attribute not specified format - forbidden)
 
-**예시 2 - 잘못된 구성 (너무 쉬움)**:
-질문: "식용 가능한 물체 중에서..."
-선택지:
-- a: 컵 (ATT 조건 불만족 - 식용 불가)
-- b: 접시 (ATT 조건 불만족 - 식용 불가)
-- c: 포크 (ATT 조건 불만족 - 식용 불가)
-- d: 케이크 조각 (정답: ATT 조건 만족)
+- ✅ **MUST USE - Format ending with "~객체"**:
+  * "정사각형 또는 직사각형의 객체" (square or rectangular object)
+  * "원통형 또는 원형의 객체" (cylindrical or round object)
+  * "밝은 색상의 객체" (bright colored object)
+  * "무채색 객체" (achromatic object)
+  * "금속 재질의 객체" (metal object)
+  * "식용 가능한 객체" (edible object)
+  * "빨간색 객체" (red object)
+  * "나무 재질의 객체" (wooden object)
 
-이 경우 ATT 조건을 만족하는 객체가 1개(d만)이므로 너무 쉽습니다. ❌
+**Question Format Examples**:
+- ✅ Correct: "테이블 위에 있는 가장 가까운 원형 또는 원통형의 객체"
+- ✅ Correct: "소파 왼쪽에 위치한 밝은 색상의 객체"
+- ✅ Correct: "싱크대 오른쪽에 있는 무채색 객체"
+- ✅ Correct: "식용 가능한 객체 중에서 포크로부터 가장 먼 객체"
+- ❌ Wrong: "소파 왼쪽에 있는 사람은 누구인가요?" (asking about person, using "는?")
+- ❌ Wrong: "테이블 위에 있는 것은 무엇인가요?" (ATT attribute not specified, using "는 무엇인가요?")
+- ❌ Wrong: "가장 가까운 것은?" (ATT attribute not specified, using "는?")
+- ❌ Wrong: "가장 가까운 객체는?" (using "는?" - forbidden)
+- ❌ Wrong: "가장 가까운 객체는 무엇인가요?" (using "는 무엇인가요?" - forbidden)
 
-**검증 체크리스트**:
-- [ ] 질문의 ATT 조건을 만족하는 객체가 선택지에 최소 2개 이상 있는가? (고급 추론 능력 요구)
-- [ ] 각 선택지는 서로 다른 이유로 제외될 수 있는가?
-- [ ] 선택지에 동일한 물체가 중복되지 않았는가?
-- [ ] 선택지의 모든 객체가 이미지에 실제로 존재하는가?
+**IMPORTANT**: Questions MUST end with "~객체" that includes ATT attributes, and MUST NEVER use interrogative forms like "는?" or "는 무엇인가요?". Questions must be in noun phrase form ending with "~객체".
 
-**STEP 4: 동일 물체 중복 금지**
+**STEP 3: Design Choices for Elimination Method (Requires Advanced Reasoning)**
 
-🚨 **CRITICAL - 동일 물체 중복 금지 (절대 필수)**:
-- 각 선택지는 반드시 **서로 다른 객체 인스턴스**를 가리켜야 합니다.
-- 같은 카테고리의 객체라도, 이미지 내에서 다른 인스턴스(다른 bbox)를 가리켜야 합니다.
-- 예: 이미지에 "컵"이 3개 있어도, 선택지에 "컵"이 2번 나오면 안 됩니다. 각각 "왼쪽 컵", "오른쪽 컵", "중앙 컵" 등으로 구분해야 합니다.
+🚨 **CRITICAL - Choice Composition for Advanced Reasoning Requirements (ABSOLUTE MANDATORY)**:
+- Objects satisfying the question's ATT condition must appear in **at least 2 or more** choices.
+- This ensures that when another AI solves the problem, it cannot find the answer by simply checking if the ATT condition is satisfied, and requires additional reasoning (position, distance, etc.).
 
-**이미지 분석 결과**:
+**Example 1 - Correct Composition (Requires Advanced Reasoning)**:
+Question: "식용 가능한 물체 중에서..." (Among edible items...)
+Choices:
+- a: 케이크 조각 (ATT condition satisfied, but other conditions not satisfied)
+- b: 케이크 조각 (ATT condition satisfied, but other conditions not satisfied) ← different cake piece
+- c: 피자 (ATT condition satisfied, but other conditions not satisfied)
+- d: 햄버거 (Correct answer: ATT condition satisfied + all other conditions satisfied)
+
+In this case, 4 objects (a, b, c, d all) satisfy the ATT condition, so advanced reasoning is required.
+
+**Example 2 - Incorrect Composition (Too Easy)**:
+Question: "식용 가능한 물체 중에서..." (Among edible items...)
+Choices:
+- a: 컵 (ATT condition not satisfied - not edible)
+- b: 접시 (ATT condition not satisfied - not edible)
+- c: 포크 (ATT condition not satisfied - not edible)
+- d: 케이크 조각 (Correct answer: ATT condition satisfied)
+
+In this case, only 1 object (d only) satisfies the ATT condition, so it's too easy. ❌
+
+**Verification Checklist**:
+- [ ] Do at least 2 or more objects satisfying the question's ATT condition appear in the choices? (requires advanced reasoning)
+- [ ] Can each choice be excluded for different reasons?
+- [ ] Are there no duplicate objects in the choices?
+- [ ] Do all objects in the choices actually exist in the image?
+
+**STEP 4: Prohibit Duplicate Objects**
+
+🚨 **CRITICAL - Prohibit Duplicate Objects (ABSOLUTE MANDATORY)**:
+- Each choice must point to **different object instances**.
+- Even objects of the same category must point to different instances (different bbox) within the image.
+- Example: Even if there are 3 "컵" (cups) in the image, "컵" should not appear twice in the choices. They must be distinguished as "왼쪽 컵" (left cup), "오른쪽 컵" (right cup), "중앙 컵" (center cup), etc.
+
+**Image Analysis Results**:
 {image_analysis}
 
-**COCO 객체 정보 (bbox로 식별 가능한 객체들)**:
-- 주요 객체: {', '.join(main_objects) if main_objects else '없음'}
-- 총 객체 수: {len(category_info)}
-- 각 객체는 이미지 내 bbox로 정확히 식별 가능함
+**COCO Object Information (Objects identifiable by bbox)**:
+- Main objects: {', '.join(main_objects) if main_objects else 'None'}
+- Total object count: {len(category_info)}
+- Each object can be accurately identified by bbox within the image
 
-**중요**: 이미지 분석 결과에서 언급된 객체들 중에서, COCO 어노테이션에 존재하는 객체만 선택지로 사용하세요. 같은 종류의 객체가 여러 개 있으면 색상, 위치, 속성 등으로 명확히 구분하세요.
+**IMPORTANT**: Among objects mentioned in the image analysis results, use only objects that exist in COCO annotations as choices. If there are multiple objects of the same type, clearly distinguish them by color, position, attributes, etc.
 
-**🚨 CRITICAL - 참고 예시 (exo_data_sample.json, web_annotations_exo.json 스타일)**:
+**🚨 CRITICAL - Reference Examples (2-hop format, two tags only)**:
 
-다음 예시들을 반드시 참고하여 **복잡하고 고급 추론이 필요한** 질문과 선택지를 생성하세요:
+You MUST refer to the following examples to generate questions and choices in **2-hop format (exactly two tags only)**:
 
-**예시 1** (exo_data_sample.json - 복잡한 조건 조합):
-- 질문: "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table?"
-- 선택지: (a) glass, (b) potato fries, (c) hamburger, (d) cell phone
-- 근거: cell phone은 식용 불가 (ATT 조건 불만족), glass도 식용 불가 (ATT 조건 불만족), potato fries는 hamburger보다 가까움 (REL 조건 불만족), 따라서 hamburger가 정답
-- ✅ **복잡도**: ATT 조건 + POS 조건 + REL 조건이 모두 적용됨
-- ✅ **고급 추론**: ATT 조건을 만족하는 객체가 2개(b, c) 있어서 단순히 ATT만 확인해서는 안 됨
+**Example 1** (ATT+REL combination - exo):
+- Question: "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork?"
+- Choices: (a) glass, (b) potato fries, (c) hamburger, (d) cell phone
+- Reasoning: cell phone is not edible (ATT condition not satisfied), glass is also not edible (ATT condition not satisfied), potato fries is closer than hamburger (REL condition not satisfied), therefore hamburger is correct
+- ✅ **2-hop**: ATT + REL (no POS)
+- ✅ **Advanced Reasoning**: 2 objects (b, c) satisfy ATT condition, so cannot find answer by checking ATT only
 
-**예시 2** (exo_data_sample.json - 중첩된 공간 관계):
-- 질문: "Which <ATT>round and cylindrical object</ATT> is <REL>farthest</REL> from the person sitting <POS>on the right side of</POS> the dining table?"
-- 선택지: (a) plate, (b) white cake, (c) rightmost coke, (d) vase
-- 근거: plate, white cake, rightmost coke는 모두 가까운 편이지만, vase는 테이블 반대편에 위치하여 가장 멀리 떨어져 있음
-- ✅ **복잡도**: ATT 조건 + POS 조건(사람의 위치) + REL 조건이 모두 적용됨
-- ✅ **고급 추론**: ATT 조건을 만족하는 객체가 4개(a, b, c, d 모두) 있어서 거리 계산이 필요함
+**Example 2** (POS+REL combination - exo):
+- Question: "Which object <POS>on the left side of</POS> the table is <REL>farthest</REL> from the person?"
+- Choices: (a) plate, (b) white cake, (c) rightmost coke, (d) vase
+- Reasoning: rightmost coke is not on left side of table (POS condition not satisfied), plate and white cake are closer (REL condition not satisfied), vase is farthest
+- ✅ **2-hop**: POS + REL (no ATT)
+- ✅ **Advanced Reasoning**: Distance calculation needed among objects satisfying POS condition
 
-**예시 3** (exo_data_sample.json - 여러 조건 동시 적용):
-- 질문: "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa?"
-- 선택지: (a) handbag, (b) coke, (c) laptop, (d) cell phone
-- 근거: laptop과 cell phone은 소파 위에 있음 (POS 조건 불만족), coke는 원통형이므로 제외 (ATT 조건 불만족), handbag만 바닥에 있고 사각형 모양 (모든 조건 만족)
-- ✅ **복잡도**: ATT 조건 + REL 조건(위치 상태) + POS 조건이 모두 적용됨
-- ✅ **고급 추론**: 각 선택지가 서로 다른 이유로 제외됨 (위치, 형태 등)
+**Example 3** (POS+ATT combination - exo):
+- Question: "Which <ATT>square-shaped item</ATT> is <POS>in front of</POS> the brown-haired man sitting on the sofa?"
+- Choices: (a) handbag, (b) coke, (c) laptop, (d) cell phone
+- Reasoning: laptop and cell phone are on sofa (POS condition not satisfied), coke is cylindrical so excluded (ATT condition not satisfied), handbag is in front and square-shaped (all conditions satisfied)
+- ✅ **2-hop**: POS + ATT (no REL)
+- ✅ **Advanced Reasoning**: Each choice excluded for different reasons (position, shape, etc.)
 
-**예시 4** (web_annotations_exo.json - 복잡한 기준점):
-- 질문: "Which object is <REL>farthest</REL> from the <ATT>white object</ATT> <POS>on the left side of</POS> the child wearing a striped shirt in the center?"
-- 선택지: (a) keyboard, (b) piano, (c) sofa, (d) plant
-- 근거: sofa는 아이 오른쪽에 있음 (POS 조건 불만족), keyboard와 piano는 더 가까움 (REL 조건 불만족), plant가 가장 멀리 있음
-- ✅ **복잡도**: 기준점이 "흰색 객체"이고, 그 객체의 위치가 "아이 왼쪽"이라는 중첩된 조건
-- ✅ **고급 추론**: 기준점을 먼저 찾고, 그 기준점으로부터 거리를 계산해야 함
+**Example 4** (ATT+REL combination - ego):
+- Question: "From the perspective of the little girl, which <ATT>party item</ATT> is <REL>farthest</REL> from her?"
+- Choices: (a) cake, (b) camera, (c) party plate, (d) flower
+- Reasoning: cake, camera, party plate are closer (REL condition not satisfied), flower is farthest
+- ✅ **2-hop**: ATT + REL (no POS)
+- ✅ **Advanced Reasoning**: Distance calculation needed among objects satisfying ATT condition
 
-**예시 5** (web_annotations_exo.json - 복잡한 속성 조합):
-- 질문: "Which <ATT>object that can hold water</ATT> is the <REL>closest</REL> to the pizza placed in front of the woman <POS>on the left</POS>?"
-- 선택지: (a) fork, (b) empty glass, (c) blue vase, (d) water glass
-- 근거: fork는 물을 담을 수 없음 (ATT 조건 불만족), blue vase와 water glass는 오른쪽 여자에게 더 가까움 (POS 조건 불만족), empty glass가 왼쪽 여자 앞 피자에 가장 가까움
-- ✅ **복잡도**: ATT 조건(기능적 속성) + POS 조건(여자의 위치) + REL 조건이 모두 적용됨
-- ✅ **고급 추론**: ATT 조건을 만족하는 객체가 3개(b, c, d) 있어서 위치와 거리를 모두 고려해야 함
+**Example 5** (POS+REL combination - ego):
+- Question: "When I'm sitting on the right side of the sofa, which object <POS>on my left side</POS> is <REL>closest</REL> to me?"
+- Choices: (a) fan, (b) large bottle, (c) shoe, (d) tv
+- Reasoning: tv is not on left side (POS condition not satisfied), fan and large bottle are farther (REL condition not satisfied), shoe is closest
+- ✅ **2-hop**: POS + REL (no ATT)
+- ✅ **Advanced Reasoning**: Distance calculation needed among objects satisfying POS condition
 
-**예시 6** (web_annotations_exo.json - 복잡한 공간 관계):
-- 질문: "Which object <REL>farthest</REL> from the window <POS>on the table</POS> among the <ATT>square or rectangular objects</ATT>?"
-- 선택지: (a) backpack, (b) laptop, (c) beige book, (d) blue bowl
-- 근거: backpack은 테이블 위에 없음 (POS 조건 불만족), blue bowl은 사각형이 아님 (ATT 조건 불만족), laptop은 beige book보다 창문에 가까움 (REL 조건 불만족), beige book이 가장 멀리 있음
-- ✅ **복잡도**: POS 조건 + ATT 조건 + REL 조건이 모두 적용됨
-- ✅ **고급 추론**: 각 선택지가 서로 다른 이유로 제외되고, ATT 조건을 만족하는 객체 중에서 거리를 계산해야 함
+**Example 6** (POS+ATT combination - ego):
+- Question: "When I'm standing in front of the white board, which <ATT>rectangular object</ATT> is <POS>behind me</POS>?"
+- Choices: (a) tv, (b) water bowl, (c) table, (d) tablemat
+- Reasoning: tv is not behind (POS condition not satisfied), water bowl and table are not rectangular (ATT condition not satisfied), tablemat is behind and rectangular (all conditions satisfied)
+- ✅ **2-hop**: POS + ATT (no REL)
+- ✅ **Advanced Reasoning**: Each choice excluded for different reasons
 
-**🚨 CRITICAL - 선택지 구성 원칙 (절대 필수)**:
+**🚨 CRITICAL - Choice Composition Principles (ABSOLUTE MANDATORY)**:
 
-1. **다양한 제외 이유**: 각 선택지는 서로 다른 이유로 제외되어야 합니다:
-   - ATT 조건 불만족 (속성, 형태, 색상 등)
-   - POS 조건 불만족 (위치, 공간 관계 등)
-   - REL 조건 불만족 (거리, 순서 등)
-   - 여러 조건 동시 불만족
+1. **Diverse Exclusion Reasons**: Each choice must be excluded for different reasons:
+   - ATT condition not satisfied (attributes, shape, color, etc.)
+   - POS condition not satisfied (position, spatial relationships, etc.)
+   - REL condition not satisfied (distance, order, etc.)
+   - Multiple conditions simultaneously not satisfied
 
-2. **ATT 조건 만족 객체 최소 2개 이상**: 질문의 ATT 조건을 만족하는 객체가 선택지에 최소 2개 이상 있어야 합니다. 이렇게 해야 단순히 ATT 조건만 확인해서는 정답을 찾을 수 없고, 추가적인 추론(POS, REL)이 필요합니다.
+2. **At Least 2 Objects Satisfying ATT Condition**: At least 2 or more objects satisfying the question's ATT condition must appear in the choices. This ensures that the answer cannot be found by simply checking the ATT condition, and requires additional reasoning (POS, REL).
 
-3. **선택지 다양성**: 선택지는 다양한 카테고리와 속성을 포함해야 합니다:
-   - ❌ 나쁜 예: "밝은 색상의 의자", "밝은 색상의 벤치", "밝은 색상의 식탁", "밝은 색상의 쓰레기통" (모두 같은 속성)
-   - ✅ 좋은 예: "glass", "potato fries", "hamburger", "cell phone" (다양한 속성과 카테고리)
+3. **Choice Diversity**: Choices must include diverse categories and attributes:
+   - ❌ Bad example: "밝은 색상의 의자" (bright colored chair), "밝은 색상의 벤치" (bright colored bench), "밝은 색상의 식탁" (bright colored table), "밝은 색상의 쓰레기통" (bright colored trash can) (all same attribute)
+   - ✅ Good example: "glass", "potato fries", "hamburger", "cell phone" (diverse attributes and categories)
 
-**중요**: 위 예시들을 참고하여:
-1. **복잡한 질문 구조**: 단순한 "X 오른쪽에 있는 가장 가까운 Y 객체" 형식은 절대 사용하지 마세요
-2. **중첩된 조건**: 여러 조건이 동시에 적용되는 질문을 생성하세요
-3. **다양한 제외 이유**: 각 선택지가 서로 다른 이유로 제외되도록 구성하세요
-4. **ATT 조건 만족 객체 최소 2개**: 고급 추론이 필요하도록 선택지를 구성하세요
+**IMPORTANT**: Refer to the above examples to:
+1. **Complex Question Structure**: NEVER use simple "X 오른쪽에 있는 가장 가까운 Y 객체" (closest Y object on the right side of X) format
+2. **Nested Conditions**: Generate questions with multiple conditions applied simultaneously
+3. **Diverse Exclusion Reasons**: Compose choices so each is excluded for different reasons
+4. **At Least 2 Objects Satisfying ATT Condition**: Compose choices to require advanced reasoning
 
-**출력 형식 (반드시 JSON 형식으로, 정확히 3개만 생성)**:
+**OUTPUT FORMAT (MUST be in JSON format, generate exactly 3 questions)**:
 
-🚨 **CRITICAL**: 모든 질문은 반드시 "~객체"로 끝나야 합니다. "는?", "는 무엇인가요?" 같은 의문사는 절대 사용하지 마세요.
+🚨 **CRITICAL**: All questions MUST end with "~객체" (object). NEVER use interrogative forms like "는?" (is?) or "는 무엇인가요?" (what is?).
+
+⚠️ **IMPORTANT**: Generate questions in KOREAN language, but follow all English instructions above.
 
 {{
   "questions": [
@@ -1509,45 +1681,75 @@ def generate_question_and_choices():
   ]
 }}
 
-**질문 형식 예시 (반드시 참고)**:
+**Question Format Examples (MUST refer to)**:
 
-**❌ 절대 금지 - 너무 단순한 질문**:
-- "테이블 위에 있는 가장 가까운 원형 또는 원통형의 객체" (단순 위치+속성)
-- "소파 왼쪽에 위치한 밝은 색상의 객체" (단순 위치+속성)
-- "싱크대 오른쪽에 있는 무채색 객체" (단순 위치+속성)
-- "소파 왼쪽에 있는 사람은 누구인가요?" (금지 - "는 누구인가요?" 사용)
-- "테이블 위에 있는 것은 무엇인가요?" (금지 - ATT 속성 미명시, "는 무엇인가요?" 사용)
-- "가장 가까운 것은?" (금지 - ATT 속성 미명시, "는?" 사용)
+**❌ ABSOLUTELY FORBIDDEN - Too Simple Questions**:
+- "테이블 위에 있는 가장 가까운 원형 또는 원통형의 객체" (simple position+attribute)
+- "소파 왼쪽에 위치한 밝은 색상의 객체" (simple position+attribute)
+- "싱크대 오른쪽에 있는 무채색 객체" (simple position+attribute)
+- "소파 왼쪽에 있는 사람은 누구인가요?" (forbidden - using "는 누구인가요?")
+- "테이블 위에 있는 것은 무엇인가요?" (forbidden - ATT attribute not specified, using "는 무엇인가요?")
+- "가장 가까운 것은?" (forbidden - ATT attribute not specified, using "는?")
 
-**✅ 반드시 사용 - 복잡하고 고급 추론이 필요한 질문**:
-- "식용 가능한 객체 중에서 포크로부터 가장 먼 객체" (ATT + REL)
-- "테이블 왼쪽에 있는 물체들 중 두 번째로 먼 객체" (POS + REL)
-- "소파 오른쪽에 위치한 밝은 색상의 객체" (POS + ATT)
-- "전자레인지 위에 있는 원형 또는 원통형 객체" (POS + ATT)
-- "파티용품 객체 중에서 사람과의 두 번째로 가까운 객체" (ATT + REL)
+**✅ MUST USE - Complex Advanced Reasoning Questions (2-hop, each tag 1 each)**:
+- "식용 가능한 객체 중에서 포크로부터 가장 먼 객체" (ATT 1 + REL 1, no POS)
+- "테이블 왼쪽에 있는 물체들 중 두 번째로 먼 객체" (POS 1 + REL 1, no ATT)
+- "소파 오른쪽에 위치한 밝은 색상의 객체" (POS 1 + ATT 1, no REL)
+- "전자레인지 위에 있는 원형 또는 원통형 객체" (POS 1 + ATT 1, no REL)
+- "파티용품 객체 중에서 사람과의 두 번째로 가까운 객체" (ATT 1 + REL 1, no POS)
 
-🚨 **최종 검증 체크리스트 (생성 전 반드시 확인)**:
+═══════════════════════════════════════════════════════════════════════════════
+🚨 FINAL VERIFICATION CHECKLIST (MUST verify step-by-step before generation)
+═══════════════════════════════════════════════════════════════════════════════
 
-**질문 복잡도 검증**:
-- [ ] 질문이 단순한 "X 오른쪽에 있는 가장 가까운 Y 객체" 형식이 아닌가? (이런 형식은 절대 금지)
-- [ ] 질문에 중첩된 조건이나 복잡한 공간 관계가 포함되어 있는가?
-- [ ] 각 질문에 ATT, POS, REL이 모두 포함되어 있고, 서로 복잡하게 얽혀있는가?
+**STEP 1: Tag Count Verification (MOST IMPORTANT!)**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] Count <ATT> tags in question → Is it exactly 0 or 1?
+[ ] Count <POS> tags in question → Is it exactly 0 or 1?
+[ ] Count <REL> tags in question → Is it exactly 0 or 1?
+[ ] Count total tags → Is it exactly 2? (3 tags = ❌, 1 tag = ❌)
+[ ] Is the used tag combination included in {allowed_tag_pairs}?
 
-**질문 형식 검증**:
-- [ ] **CRITICAL**: 질문이 "~객체"로 끝나는가? ("는?", "는 무엇인가요?", "~사람은 누구인가요?", "것은 무엇인가요?" 형식 금지)
-- [ ] ATT 태그에 구체적 명사("컵", "접시" 등)가 아닌 속성 기반 표현("원형 또는 원통형 객체" 등)을 사용했는가?
-- [ ] ATT 속성이 실제 이미지의 객체와 정확히 일치하는가?
-- [ ] POS 표현이 구체적 객체 기준인가? ("이미지 중앙" 대신 "테이블 중앙" 등)
-- [ ] 위치 반전 규칙을 적용했는가? (실제 왼쪽 → 질문에서는 오른쪽)
+**STEP 2: ATT Tag Usage Verification**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] If ATT tag is used, is there a modifier BEFORE "객체/물체/항목"?
+    - Modifier examples: color, shape, material, function, etc.
+    - Example: "빨간색 객체" ✅ / "객체" ❌
+[ ] If ATT tag is NOT used, is it a plain "객체/물체" mention?
+[ ] Are concrete nouns ("컵" cup, "접시" plate, etc.) NOT used?
+[ ] Are attribute-based expressions ("원형 객체" round object, "빨간색 객체" red object, etc.) used?
 
-**선택지 구성 검증**:
-- [ ] 질문의 ATT 조건을 만족하는 객체가 선택지에 최소 2개 이상 있는가? (고급 추론 능력 요구)
-- [ ] 각 선택지는 서로 다른 이유로 제외될 수 있는가? (ATT 불만족, POS 불만족, REL 불만족 등)
-- [ ] 선택지에 동일한 물체가 중복되지 않았는가?
-- [ ] 선택지의 모든 객체가 이미지에 실제로 존재하는가?
-- [ ] 선택지가 다양한 카테고리와 속성을 포함하고 있는가? (모두 같은 속성의 객체가 아닌가?)
+**STEP 3: POS Tag Usage Verification**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] Does POS tag use specific object-based position?
+    - ✅ "테이블 중앙에" (center of table), "소파 왼쪽에" (left side of sofa)
+    - ❌ "이미지 중앙에" (center of image), "화면 위에" (top of screen) (ambiguous)
+[ ] Is position reversal rule applied? (actual left → question right)
 
-**중요**: 정확히 3개의 질문만 생성하고, 각 질문은 반드시 위의 모든 규칙을 준수해야 합니다. 반드시 유효한 JSON 형식으로 응답하세요."""
+**STEP 4: REL Tag Usage Verification**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] Does REL tag use relationship expressions for distance/order/height, etc.?
+    - Examples: "가장 가까운" (closest), "가장 먼" (farthest), "두 번째로 가까운" (second-closest), etc.
+
+**STEP 5: Question Format Verification**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] Does question end with "~객체"? (NOT using "는?", "는 무엇인가요?")
+[ ] Is question in noun phrase form? (NOT using interrogative forms)
+
+**STEP 6: Choice Composition Verification**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] Do at least 2 or more objects satisfying the question's ATT condition appear in choices?
+[ ] Can each choice be excluded for different reasons?
+[ ] Are there no duplicate objects in choices?
+[ ] Do all objects in choices actually exist in the image?
+[ ] Do choices include diverse categories and attributes?
+
+**STEP 7: Image Match Verification**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ ] Does ATT attribute exactly match actual objects in the image?
+[ ] Do objects mentioned in the question actually exist in the image?
+
+**IMPORTANT**: Generate exactly 3 questions, and each question MUST follow all rules above. MUST respond in valid JSON format."""
 
         # RateLimitError 처리: 재시도 로직 포함
         max_retries = 5
@@ -1563,7 +1765,30 @@ def generate_question_and_choices():
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are an expert VQA question generator specializing in complex, multi-hop reasoning questions. CRITICAL RULES: 1) Each question MUST include ATT (attribute), POS (position), REL (relationship) in a COMPLEX, INTERWOVEN manner - NOT simple patterns like 'X right side, closest Y object'. 2) Questions MUST require advanced reasoning with nested conditions, multiple spatial relationships, or complex attribute combinations. 3) Use ONLY objects that actually exist in the image. 4) Choices must be clearly distinguishable and diverse (use color, position: 'red cup', 'leftmost chair'). 5) For POS, use specific object references ('center of table', NOT 'center of image'). 6) Reverse left/right positions in questions. 7) Use ONLY objective attributes (color, shape, material) - NEVER subjective ('small', 'pretty'). 8) Ask about concrete objects, NOT abstract properties. 9) At least 2 choices MUST satisfy the ATT condition to require advanced reasoning. 10) Each choice should be excluded for DIFFERENT reasons (ATT failure, POS failure, REL failure, etc.). 11) Generate exactly 3 questions with DIFFERENT complex structures. Return valid JSON."
+                            "content": """You are an expert VQA question generator specializing in 2-hop reasoning questions. 
+
+CRITICAL RULES (MUST FOLLOW EXACTLY):
+
+RULE 1 - TAG COUNT (MOST IMPORTANT):
+- Use EXACTLY TWO tags per question (ATT, POS, REL 중 2개만)
+- Each tag type must appear EXACTLY ONCE (ATT 1개, POS 1개, REL 1개 중 2개만)
+- NEVER use all three tags
+- NEVER use same tag type twice
+
+RULE 2 - ATT TAG DECISION:
+- Use <ATT> tag ONLY when object has modifier (수식어가 붙은 객체)
+  Example: '빨간색 객체' → <ATT>red object</ATT>
+- DO NOT use <ATT> tag for plain '객체' or '물체' (no modifier)
+  Example: '객체' → just 'object' (NO <ATT> tag)
+
+RULE 3 - QUESTION QUALITY:
+- Questions MUST require advanced reasoning
+- Use ONLY objects that exist in the image
+- At least 2 choices MUST satisfy ATT condition
+- Each choice excluded for DIFFERENT reasons
+- Generate exactly 3 questions with DIFFERENT 2-hop structures
+
+Return valid JSON."""
                         },
                         {
                             "role": "user",
@@ -1725,15 +1950,21 @@ CRITICAL TAG USAGE RULES (2-hop):
    - Examples: "round object", "green object", "white object", "rectangular object", "party item", "furry creature"
    - Use for describing WHAT object/group is being asked about
    
-🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
-   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
-   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
-   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
-   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
-   - WRONG: "which white object" (missing <ATT> tag)
+🚨 CRITICAL - <ATT> TAG USAGE RULES:
+   - ✅ **USE <ATT> TAG**: When Korean question contains objects WITH modifiers (수식어가 붙은 객체)
+     * "흰색 객체" (white object) → "<ATT>white object</ATT>"
+     * "빨간색 객체" (red object) → "<ATT>red object</ATT>"
+     * "원형 객체" (round object) → "<ATT>round object</ATT>"
+     * "정사각형 객체" (square object) → "<ATT>square object</ATT>"
+     * "식용 가능한 물체" (edible item) → "<ATT>edible item</ATT>"
+     * "밝은 색상의 객체" (bright colored object) → "<ATT>bright colored object</ATT>"
+   - ❌ **DO NOT USE <ATT> TAG**: When Korean question contains plain "객체" (object), "물체" (item) WITHOUT modifiers
+     * "객체" (object) → just "object" (NO <ATT> tag)
+     * "물체" (item) → just "item" (NO <ATT> tag)
+   - WRONG: "which <ATT>object</ATT>" (plain object without modifier)
+   - CORRECT: "which object" (no ATT tag for plain object)
+   - WRONG: "which white object" (missing <ATT> tag for object with modifier)
    - CORRECT: "which <ATT>white object</ATT>"
-   - WRONG: "which person" (missing <ATT> tag)
-   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
 
 4. GENERAL RULES:
    - Tags MUST contain actual meaningful content (NOT empty like <ATT></ATT>)
@@ -1742,13 +1973,13 @@ CRITICAL TAG USAGE RULES (2-hop):
    - DO NOT use generic phrases like "in the image" for <POS> tag
    - If a phrase contains both attribute and location, split them appropriately
 
-Reference examples from ego_data_sample.json:
+Reference examples from ego_data_sample.json (2-hop format, two tags only):
 
-Example 1: "From the perspective of the little girl standing in front of the man, which <ATT>party item</ATT> is <REL>farthest</REL> and located <POS>to the right</POS> of her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 1 (ATT+REL): "From the perspective of the little girl, which <ATT>party item</ATT> is <REL>farthest</REL> from her? <choice>(a) cake, (b) camera, (c) party plate, (d) flower</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 2: "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> on the <POS>right side of the room</POS> is <REL>farthest from me</REL>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 2 (POS+ATT): "When I'm sitting on the right side of the large sofa, which <ATT>square or rectangular object</ATT> is <POS>on the right side of the room</POS>? <choice>(a) fan, (b) large bottle, (c) shoe, (d) tv</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 3: "From the perspective of the woman, which <ATT>silver object</ATT> <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 3 (POS+REL): "From the perspective of the woman, which object <POS>to the right of</POS> her is <REL>closest to her</REL>? <choice>(a) fork, (b) knife, (c) spoon, (d) wine glass</choice> And provide the bounding box coordinate of the region related to your answer."
 
 Korean question: {question_ko}
 
@@ -1777,9 +2008,10 @@ Translate the Korean question and choices to English following the EXACT format 
 - <POS> is used ONLY for position/location information from the person's perspective (on the left side, on the right side, etc.)
 - <ATT> is used ONLY for attributes or target groups (round object, green object, white object, person, etc.)
 - 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (POS+REL), (ATT+REL), (POS+ATT). Do NOT add the third tag.
-- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
-- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
+- 🚨 ATT TAG RULE: Use <ATT> tag ONLY when Korean question contains objects WITH modifiers (수식어가 붙은 객체). Do NOT use <ATT> tag for plain "객체" (object) or "물체" (item) without modifiers.
+- 🚨 MANDATORY: If Korean question contains objects with modifiers like "흰색 객체" (white object), "빨간색 객체" (red object), "원형 객체" (round object), you MUST use <ATT> tag
 - 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
+- 🚨 DO NOT USE ATT TAG: If Korean question contains plain "객체" (object) or "물체" (item) without modifiers, translate as just "object" or "item" WITHOUT <ATT> tags
 - All tags have meaningful content inside them
 - Tags are naturally embedded in the question sentence
 - <choice> tag comes before "And provide..." phrase
@@ -1819,15 +2051,21 @@ CRITICAL TAG USAGE RULES (2-hop):
    - CORRECT: "<ATT>Among the items</ATT> on the table..."
    - WRONG: "<ATT>flag in the center of the table</ATT>" (contains location, should split: flag <POS>in the center of the table</POS>)
    
-🚨 CRITICAL - <ATT> TAG IS MANDATORY WHEN:
-   - Korean question contains attribute words like: "흰색" (white), "빨간색" (red), "원형" (round), "정사각형" (square), "사람" (person), "객체" (object), "물체" (item), etc.
-   - Korean question ends with "~사람은?" (which person?), "~객체는?" (which object?), "~물체는?" (which item?)
-   - Korean question mentions specific attributes: "~색" (color), "~모양" (shape), "~재질" (material)
-   - ALWAYS wrap attribute descriptions in <ATT> tags, even if the question seems simple
-   - WRONG: "which white object" (missing <ATT> tag)
+🚨 CRITICAL - <ATT> TAG USAGE RULES:
+   - ✅ **USE <ATT> TAG**: When Korean question contains objects WITH modifiers (수식어가 붙은 객체)
+     * "흰색 객체" (white object) → "<ATT>white object</ATT>"
+     * "빨간색 객체" (red object) → "<ATT>red object</ATT>"
+     * "원형 객체" (round object) → "<ATT>round object</ATT>"
+     * "정사각형 객체" (square object) → "<ATT>square object</ATT>"
+     * "식용 가능한 물체" (edible item) → "<ATT>edible item</ATT>"
+     * "밝은 색상의 객체" (bright colored object) → "<ATT>bright colored object</ATT>"
+   - ❌ **DO NOT USE <ATT> TAG**: When Korean question contains plain "객체" (object), "물체" (item) WITHOUT modifiers
+     * "객체" (object) → just "object" (NO <ATT> tag)
+     * "물체" (item) → just "item" (NO <ATT> tag)
+   - WRONG: "which <ATT>object</ATT>" (plain object without modifier)
+   - CORRECT: "which object" (no ATT tag for plain object)
+   - WRONG: "which white object" (missing <ATT> tag for object with modifier)
    - CORRECT: "which <ATT>white object</ATT>"
-   - WRONG: "which person" (missing <ATT> tag)
-   - CORRECT: "which <ATT>person</ATT>" or "which <ATT>person in white shirt</ATT>"
 
 4. GENERAL RULES:
    - Tags MUST contain actual meaningful content (NOT empty like <ATT></ATT>)
@@ -1836,15 +2074,15 @@ CRITICAL TAG USAGE RULES (2-hop):
    - DO NOT use generic phrases like "in the image" for <POS> tag
    - If a phrase contains both attribute and location, split them appropriately
 
-Reference examples from exo_data_sample.json:
+Reference examples from exo_data_sample.json (2-hop format, two tags only):
 
-Example 1: "<REL>Second-closest</REL> to the refrigerator a countertop located <POS>in the center</POS> of the image, which object is it <ATT>among the items</ATT>? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 1 (POS+REL): "Which object <POS>in the center</POS> of the countertop is <REL>second-closest</REL> to the refrigerator? <choice>(a) sink, (b) vase, (c) orange bag, (d) rightmost red chair</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 2: "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL> <POS>in front of</POS> the brown-haired man sitting on the sofa? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 2 (ATT+REL): "Which <ATT>square-shaped item</ATT> is <REL>placed on the floor</REL>? <choice>(a) handbag, (b) coke, (c) laptop, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 3: "Which <ATT>round and cylindrical object</ATT> is <REL>farthest</REL> from the person sitting <POS>on the right side of</POS> the dining table? <choice>(a) plate, (b) white cake, (c) rightmost coke, (d) vase</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 3 (ATT+REL): "Which <ATT>round and cylindrical object</ATT> is <REL>farthest</REL> from the person? <choice>(a) plate, (b) white cake, (c) rightmost coke, (d) vase</choice> And provide the bounding box coordinate of the region related to your answer."
 
-Example 4: "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork <POS>on the left side of</POS> the table? <choice>(a) glass, (b) potato fries, (c) hamburger, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
+Example 4 (ATT+REL): "Which <ATT>edible food item</ATT> is the <REL>farthest</REL> from the fork? <choice>(a) glass, (b) potato fries, (c) hamburger, (d) cell phone</choice> And provide the bounding box coordinate of the region related to your answer."
 
 Korean question: {question_ko}
 
@@ -1871,9 +2109,11 @@ Translate the Korean question and choices to English following the EXACT format 
 - <POS> is used ONLY for position/location information (in the center, on the left side, etc.)
 - <ATT> is used ONLY for attributes or target groups (red object, white object, among the items, person, etc.)
 - 🚨 2-HOP RULE: Use EXACTLY TWO TAGS per question and ONLY from (ATT+REL), (POS+REL), (POS+ATT). Do NOT add the third tag.
-- 🚨 MANDATORY: If Korean question contains ANY attribute word (color, shape, material, "사람", "객체", "물체"), you MUST use <ATT> tag
-- 🚨 MANDATORY: If Korean question ends with "~사람은?" or "~객체는?" or "~물체는?", you MUST include <ATT> tag
+- 🚨 TAG COUNT RULE: Each tag type (ATT, POS, REL) must appear EXACTLY ONCE per question. Do NOT use multiple ATT tags, multiple POS tags, or multiple REL tags.
+- 🚨 ATT TAG RULE: Use <ATT> tag ONLY when Korean question contains objects WITH modifiers (수식어가 붙은 객체). Do NOT use <ATT> tag for plain "객체" (object) or "물체" (item) without modifiers.
+- 🚨 MANDATORY: If Korean question contains objects with modifiers like "흰색 객체" (white object), "빨간색 객체" (red object), "원형 객체" (round object), you MUST use <ATT> tag
 - 🚨 MANDATORY: NEVER translate "흰색 객체" as "white object" without <ATT> tags - it MUST be "<ATT>white object</ATT>"
+- 🚨 DO NOT USE ATT TAG: If Korean question contains plain "객체" (object) or "물체" (item) without modifiers, translate as just "object" or "item" WITHOUT <ATT> tags
 - All tags have meaningful content inside them
 - Tags are naturally embedded in the question sentence
 - <choice> tag comes before "And provide..." phrase
@@ -1906,13 +2146,33 @@ Translate the Korean question and choices to English following the EXACT format 
         if not (has_valid_att or has_valid_pos or has_valid_rel):
             return jsonify({'success': False, 'error': 'Translation must include at least one of <ATT>, <POS>, or <REL> tags with actual content inside them'}), 400
         
-        # ATT 태그 누락 검증 강화: 한국어 질문에 속성 단어가 있는데 ATT 태그가 없는 경우
-        attribute_keywords_ko = ['흰색', '빨간색', '파란색', '초록색', '검은색', '노란색', '원형', '정사각형', '직사각형', '사람', '객체', '물체', '색', '모양', '재질']
-        question_has_attribute = any(keyword in question_ko for keyword in attribute_keywords_ko)
-        if question_has_attribute and not has_valid_att:
+        # ATT 태그 누락 검증: 질문에서 찾는 대상(객체)에 속성이 있는지 확인
+        # 단순히 키워드가 있는지만 확인하는 것이 아니라, 질문의 끝 부분(찾는 대상)에 수식어가 있는지 확인
+        # 예: "파란색 청바지를 입은 사람 오른쪽에 있는 가장 높은 객체" → "가장 높은 객체"가 찾는 대상이므로 ATT 필요 없음
+        # 예: "파란색 청바지를 입은 사람 오른쪽에 있는 빨간색 객체" → "빨간색 객체"가 찾는 대상이므로 ATT 필요
+        
+        # 질문 끝 부분에서 "~객체", "~물체" 패턴 찾기
+        object_pattern = r'([가-힣\s]+(?:객체|물체|항목))'
+        matches = re.findall(object_pattern, question_ko)
+        
+        # 질문 끝 부분의 객체 표현 확인
+        question_has_target_attribute = False
+        last_object_phrase = ""
+        if matches:
+            # 마지막 매치(질문의 끝 부분) 확인
+            last_object_phrase = matches[-1].strip()
+            # 수식어가 있는지 확인 (색상, 형태, 재질 등)
+            attribute_modifiers = ['흰색', '빨간색', '파란색', '초록색', '검은색', '노란색', '원형', '정사각형', '직사각형', '사각형', '밝은', '어두운', '나무', '금속', '식용', '밝은 색상', '어두운 색상']
+            for modifier in attribute_modifiers:
+                if modifier in last_object_phrase and ('객체' in last_object_phrase or '물체' in last_object_phrase or '항목' in last_object_phrase):
+                    question_has_target_attribute = True
+                    break
+        
+        # 질문에서 찾는 대상에 속성이 있는데 ATT 태그가 없는 경우에만 에러
+        if question_has_target_attribute and not has_valid_att:
             return jsonify({
                 'success': False, 
-                'error': f'ATT tag is missing! Korean question contains attribute words but translation lacks <ATT> tag. Please ensure all attribute descriptions are wrapped in <ATT> tags. Translation: {translated_question[:200]}...'
+                'error': f'ATT tag is missing! Korean question contains attribute words in the target object phrase ("{last_object_phrase}") but translation lacks <ATT> tag. Please ensure all attribute descriptions for the target object are wrapped in <ATT> tags. Translation: {translated_question[:200]}...'
             }), 400
         
         if '<choice>' not in translated_question:
@@ -3277,16 +3537,18 @@ def get_images_by_status():
             print(f"[WARN] 상태별 이미지 조회 중 Google Sheets 읽기 실패: {e}")
             sheet_data = []
         
-        # 모든 이미지 ID 가져오기 (ego_images 기준)
-        all_ego_image_ids = []
+        # 모든 이미지 ID 가져오기 (exo_images와 ego_images 둘 다 확인)
+        all_image_ids = []
         for image_id in annotator.image_ids:
             image_info = annotator.coco.imgs[image_id]
             file_name = image_info.get('file_name', '')
+            exo_path = os.path.join(annotator.exo_images_folder, file_name)
             ego_path = os.path.join(annotator.ego_images_folder, file_name)
-            if os.path.exists(ego_path):
-                all_ego_image_ids.append(image_id)
+            # exo 또는 ego 폴더 중 하나라도 존재하면 포함
+            if os.path.exists(exo_path) or os.path.exists(ego_path):
+                all_image_ids.append(image_id)
         
-        # Google Sheets 데이터를 image_id로 매핑
+        # Google Sheets 데이터를 image_id로 매핑 (view 필터링 없이 모든 데이터 포함)
         sheet_data_map = {}
         for row in sheet_data:
             image_id_str = row.get('Image ID', '') or row.get('image_id', '')
@@ -3307,7 +3569,7 @@ def get_images_by_status():
         # 상태별로 필터링
         filtered_images = []
         
-        for image_id in all_ego_image_ids:
+        for image_id in all_image_ids:
             sheet_info = sheet_data_map.get(image_id, {})
             review_status = sheet_info.get('review_status', '')
             저장시간 = sheet_info.get('저장시간', '')
@@ -3419,7 +3681,7 @@ def get_images_by_status():
         
         # 미작업 필터링: Google Sheets에 없는 이미지도 포함
         if status == 'unfinished':
-            for image_id in all_ego_image_ids:
+            for image_id in all_image_ids:
                 if image_id not in sheet_data_map:
                     # Google Sheets에 없는 이미지는 미작업
                     filtered_images.append({
@@ -3656,18 +3918,19 @@ def get_work_statistics():
         sheet_data = read_from_google_sheets(worker_id)
         print(f"[DEBUG] Google Sheets에서 읽은 데이터 개수: {len(sheet_data)}")
         
-        # 모든 ego 이미지 개수
-        all_ego_count = 0
+        # 모든 이미지 개수 (exo + ego)
+        all_image_count = 0
         for image_id in annotator.image_ids:
             image_info = annotator.coco.imgs[image_id]
             file_name = image_info.get('file_name', '')
+            exo_path = os.path.join(annotator.exo_images_folder, file_name)
             ego_path = os.path.join(annotator.ego_images_folder, file_name)
-            if os.path.exists(ego_path):
-                all_ego_count += 1
+            if os.path.exists(exo_path) or os.path.exists(ego_path):
+                all_image_count += 1
         
         # 상태별 카운트
         stats = {
-            'total': all_ego_count,
+            'total': all_image_count,
             'unfinished': 0,
             'working': 0,  # 작업: 구글시트에 저장시간이 있지만 검수가 안된 것 (SKIP 제외)
             'passed': 0,
@@ -3687,11 +3950,8 @@ def get_work_statistics():
             
             try:
                 image_id = int(image_id_str)
-                # View 컬럼 확인 (ego인지 확인)
+                # View 컬럼 확인 (exo 또는 ego 모두 포함)
                 view = row.get('View', '') or row.get('view', '') or ''
-                # View가 'ego'가 아니면 스킵 (ego 이미지만 통계에 포함)
-                if view and view.lower() != 'ego':
-                    continue
                 
                 # SKIP 컬럼 값 읽기 (대소문자 구분 없이)
                 skip_value = row.get('SKIP', '') or row.get('skip', '') or row.get('스킵', '')
@@ -3734,11 +3994,6 @@ def get_work_statistics():
             
             print(f"[DEBUG] Image ID {image_id} 상태 확인: view='{view}', review_status='{review_status}', skip_status='{skip_status}', revision_status='{revision_status}'")
             
-            # View가 'ego'가 아니면 스킵 (이미 sheet_data_map에 넣을 때 필터링했지만 다시 확인)
-            if view and view.lower() != 'ego':
-                print(f"[WARN] Image ID {image_id}의 View가 'ego'가 아닙니다: '{view}'")
-                continue
-            
             processed_image_ids.add(image_id)
             
             # SKIP 상태 우선 확인 (가장 먼저 확인)
@@ -3773,12 +4028,6 @@ def get_work_statistics():
         pending_review_count = 0
         for image_id in sheet_data_map.keys():
             sheet_info = sheet_data_map[image_id]
-            view = sheet_info.get('view', '')
-            
-            # View가 'ego'가 아니면 스킵
-            if view and view.lower() != 'ego':
-                continue
-            
             review_status = sheet_info.get('review_status', '')
             revision_status = sheet_info.get('수정여부', '')
             
