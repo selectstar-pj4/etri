@@ -4063,9 +4063,12 @@ def get_work_statistics():
                 stats['passed'] += 1
                 print(f"[DEBUG] 통과 카운트: Image ID {image_id}, review_status='{review_status}'")
             elif review_status == '불통':
-                # 불통: 수정여부와 무관하게 불통 카운트
-                stats['failed'] += 1
-                print(f"[DEBUG] 불통 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
+                # 불통: 수정완료(검수대기)는 별도 집계, 나머지만 불통 카운트
+                if revision_status == '수정완료' or revision_status == '수정 완료':
+                    print(f"[DEBUG] 검수대기(수정완료)로 분리: Image ID {image_id}")
+                else:
+                    stats['failed'] += 1
+                    print(f"[DEBUG] 불통 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
             elif review_status == '납품 완료' or review_status == '납품완료':
                 stats['delivered'] += 1
                 print(f"[DEBUG] 납품완료 카운트: Image ID {image_id}, review_status='{review_status}'")
@@ -4077,7 +4080,7 @@ def get_work_statistics():
         # 2단계: annotator.image_ids에 있지만 Google Sheets에 없는 image_id는 미작업으로 카운트하지 않음
         # (이미 전체 개수에서 계산됨)
         
-        # 미작업 계산: 전체 - 통과 - 불통 - 검수 대기 - SKIP
+        # 미작업 계산: 전체 - 통과 - 불통 - 검수 대기 - SKIP - 작업 - 납품완료
         # 검수 대기는 불통 중 수정완료된 것들
         pending_review_count = 0
         for image_id in sheet_data_map.keys():
@@ -4090,16 +4093,15 @@ def get_work_statistics():
                 print(f"[DEBUG] 검수대기 카운트: Image ID {image_id}, review_status='{review_status}', 수정여부='{revision_status}'")
         
         # 미작업 = 전체 이미지 - 작업 - 납품완료 - 통과 - 불통 - SKIP
-        # (불통-수정완료는 '검수대기'로 별도 표기하지만 미작업에서 추가 차감하지 않음)
         stats['pending_review'] = pending_review_count
         print(f"[DEBUG] 통계 계산: 전체={stats['total']}, 작업={stats['working']}, 납품완료={stats['delivered']}, 통과={stats['passed']}, 불통={stats['failed']}, 검수대기={stats.get('pending_review', 0)}, SKIP={stats['skipped']}")
-        stats['unfinished'] = stats['total'] - stats['working'] - stats['delivered'] - stats['passed'] - stats['failed'] - stats['skipped']
-        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['working']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {stats['skipped']}")
+        stats['unfinished'] = stats['total'] - stats['working'] - stats['delivered'] - stats['passed'] - stats['failed'] - stats['pending_review'] - stats['skipped']
+        print(f"[DEBUG] 미작업 계산 결과: {stats['unfinished']} = {stats['total']} - {stats['working']} - {stats['delivered']} - {stats['passed']} - {stats['failed']} - {stats['pending_review']} - {stats['skipped']}")
         if stats['unfinished'] < 0:
             stats['unfinished'] = 0  # 음수 방지
         
         # 완료율 계산 (저장시간이 있는 것들)
-        completed_count = stats['passed'] + stats['failed'] + stats['delivered'] + stats['completed']
+        completed_count = stats['passed'] + stats['failed'] + stats['pending_review'] + stats['delivered'] + stats['completed']
         stats['completion_rate'] = (completed_count / stats['total'] * 100) if stats['total'] > 0 else 0
         
         # 캐시에 저장
